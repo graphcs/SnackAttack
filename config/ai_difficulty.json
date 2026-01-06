@@ -1,0 +1,26 @@
+{
+  "difficulties": {
+    "easy": {
+      "reaction_delay_ms": 500,
+      "decision_accuracy": 0.6,
+      "pathfinding_efficiency": 0.7,
+      "avoids_penalties": false,
+      "targets_powerups": false
+    },
+    "medium": {
+      "reaction_delay_ms": 250,
+      "decision_accuracy": 0.8,
+      "pathfinding_efficiency": 0.85,
+      "avoids_penalties": true,
+      "targets_powerups": true
+    },
+    "hard": {
+      "reaction_delay_ms": 100,
+      "decision_accuracy": 0.95,
+      "pathfinding_efficiency": 0.95,
+      "avoids_penalties": true,
+      "targets_powerups": true
+    }
+  },
+  "default_difficulty": "medium"
+}

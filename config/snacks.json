@@ -1,0 +1,86 @@
+{
+  "snacks": [
+    {
+      "id": "pizza",
+      "name": "Pizza",
+      "point_value": 100,
+      "effect": null,
+      "spawn_weight": 40,
+      "despawn_seconds": 8.0,
+      "color": [255, 210, 80],
+      "size": [48, 48]
+    },
+    {
+      "id": "bone",
+      "name": "Bone",
+      "point_value": 25,
+      "effect": {
+        "type": "speed_boost",
+        "magnitude": 1.5,
+        "duration_seconds": 5.0
+      },
+      "spawn_weight": 20,
+      "despawn_seconds": 6.0,
+      "color": [255, 252, 245],
+      "size": [48, 48]
+    },
+    {
+      "id": "broccoli",
+      "name": "Broccoli",
+      "point_value": -50,
+      "effect": {
+        "type": "slow",
+        "magnitude": 0.5,
+        "duration_seconds": 3.0
+      },
+      "spawn_weight": 15,
+      "despawn_seconds": 10.0,
+      "color": [60, 160, 60],
+      "size": [48, 48]
+    },
+    {
+      "id": "spicy_pepper",
+      "name": "Spicy Pepper",
+      "point_value": 200,
+      "effect": {
+        "type": "chaos",
+        "magnitude": 1.0,
+        "duration_seconds": 4.0
+      },
+      "spawn_weight": 5,
+      "despawn_seconds": 5.0,
+      "color": [220, 45, 45],
+      "size": [48, 48]
+    },
+    {
+      "id": "bacon",
+      "name": "Bacon",
+      "point_value": 150,
+      "effect": null,
+      "spawn_weight": 15,
+      "despawn_seconds": 7.0,
+      "color": [180, 60, 60],
+      "size": [48, 48]
+    },
+    {
+      "id": "steak",
+      "name": "Steak",
+      "point_value": 250,
+      "effect": {
+        "type": "invincibility",
+        "magnitude": 1.0,
+        "duration_seconds": 2.0
+      },
+      "spawn_weight": 5,
+      "despawn_seconds": 4.0,
+      "color": [150, 90, 55],
+      "size": [48, 48]
+    }
+  ],
+  "spawn_settings": {
+    "base_spawn_interval_seconds": 1.5,
+    "min_spawn_interval_seconds": 0.5,
+    "max_active_snacks_per_arena": 10,
+    "spawn_acceleration_per_level": 0.9
+  }
+}

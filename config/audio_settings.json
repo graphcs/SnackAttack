@@ -1,0 +1,7 @@
+{
+  "master_volume": 0.7,
+  "music_volume": 0.8,
+  "sfx_volume": 0.8,
+  "music_enabled": true,
+  "sfx_enabled": true
+}
