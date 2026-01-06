@@ -20,8 +20,8 @@ A retro-style 2D arcade game where players control dogs to collect snacks! Featu
 ### Character Selection
 ![Character Select](screenshots/character_select.png)
 
-### Characters
-![Characters](screenshots/characters.png)
+### Gameplay
+<img width="1904" height="1488" alt="CleanShot 2026-01-06 at 18 44 44@2x" src="https://github.com/user-attachments/assets/ab0ccf86-36b3-4580-aebe-73b8917bf837" />
 
 ### Settings
 ![Settings](screenshots/settings.png)
