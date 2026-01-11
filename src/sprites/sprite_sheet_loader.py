@@ -24,6 +24,7 @@ class SpriteSheetLoader:
     # Target gameplay sprite size
     GAMEPLAY_SIZE = (64, 64)
     PORTRAIT_SIZE = (128, 128)
+    FOOD_SIZE = (48, 48)  # Snack sprite size
 
     # Animation timing (in seconds)
     RUN_FRAME_DURATION = 0.1      # 10 FPS for run cycle
@@ -38,6 +39,16 @@ class SpriteSheetLoader:
         'lobo': 'Lobo',
         'rex': 'Rex',
         'jazzy': 'Jazzy'
+    }
+
+    # Snack ID to food image filename mapping
+    FOOD_NAMES = {
+        'pizza': 'Pizza',
+        'bone': 'Bone',
+        'broccoli': 'Broccoli',
+        'spicy_pepper': 'Chilli',
+        'bacon': 'Bacon',
+        'steak': 'Steak'
     }
 
     def __new__(cls) -> 'SpriteSheetLoader':
@@ -59,9 +70,13 @@ class SpriteSheetLoader:
         # Cache for portraits
         self._portrait_cache: Dict[str, pygame.Surface] = {}
 
-        # Base path for sprite sheets
+        # Cache for food sprites
+        self._food_cache: Dict[str, pygame.Surface] = {}
+
+        # Base paths
         self._sprite_path = self._get_sprite_path()
         self._profile_path = self._get_profile_path()
+        self._food_path = self._get_food_path()
 
     def _get_sprite_path(self) -> str:
         """Get the path to sprite sheets folder."""
@@ -75,6 +90,13 @@ class SpriteSheetLoader:
         # This file is at: snack_attack/src/sprites/
         current_dir = os.path.dirname(os.path.abspath(__file__))
         return os.path.join(current_dir, '..', '..', 'Profile')
+
+    def _get_food_path(self) -> str:
+        """Get the path to food images folder."""
+        # Food folder is at: snack_attack/Food/
+        # This file is at: snack_attack/src/sprites/
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(current_dir, '..', '..', 'Food')
 
     def _get_sprite_sheet_filename(self, character_id: str, animation_type: str) -> str:
         """Get the filename for a sprite sheet."""
@@ -197,6 +219,28 @@ class SpriteSheetLoader:
 
         return None
 
+    def get_food_sprite(self, snack_id: str) -> Optional[pygame.Surface]:
+        """Get food sprite image for a snack."""
+        if snack_id in self._food_cache:
+            return self._food_cache[snack_id]
+
+        name = self.FOOD_NAMES.get(snack_id)
+        if name is None:
+            return None
+
+        filepath = os.path.join(self._food_path, f"{name}.png")
+
+        try:
+            if os.path.exists(filepath):
+                sprite = pygame.image.load(filepath).convert_alpha()
+                sprite = pygame.transform.smoothscale(sprite, self.FOOD_SIZE)
+                self._food_cache[snack_id] = sprite
+                return sprite
+        except pygame.error as e:
+            print(f"Error loading food sprite for {snack_id}: {e}")
+
+        return None
+
     def preload_character(self, character_id: str) -> None:
         """Preload all animations for a character."""
         for animation_type in ['run', 'eat']:
@@ -213,3 +257,4 @@ class SpriteSheetLoader:
         """Clear all cached sprites."""
         self._animation_cache.clear()
         self._portrait_cache.clear()
+        self._food_cache.clear()

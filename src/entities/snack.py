@@ -97,7 +97,7 @@ class Snack:
 
     def render(self, surface: pygame.Surface, offset: Tuple[int, int] = (0, 0)) -> None:
         """
-        Render the snack using pixel art sprites.
+        Render the snack using PNG food sprites.
 
         Args:
             surface: Surface to render to
@@ -106,14 +106,20 @@ class Snack:
         if not self.active:
             return
 
+        from ..sprites.sprite_sheet_loader import SpriteSheetLoader
         from ..sprites.pixel_art import SpriteCache
 
         render_x = int(self.x - self.arena_bounds.left + offset[0])
         render_y = int(self.y - self.arena_bounds.top + offset[1] + self.bob_offset)
 
-        # Get the pixel art sprite
-        cache = SpriteCache()
-        sprite = cache.get_snack_sprite(self.snack_id)
+        # Try to get PNG food sprite first
+        loader = SpriteSheetLoader()
+        sprite = loader.get_food_sprite(self.snack_id)
+
+        # Fall back to procedural sprite if PNG not available
+        if sprite is None:
+            cache = SpriteCache()
+            sprite = cache.get_snack_sprite(self.snack_id)
 
         # Handle despawn flashing
         despawn_progress = self.get_despawn_progress()
