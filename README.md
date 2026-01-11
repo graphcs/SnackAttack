@@ -6,7 +6,8 @@ A retro-style 2D arcade game where players control dogs to collect snacks! Featu
 
 ## Features
 
-- **7 Unique Dog Characters** - Each with different speeds and personalities
+- **6 Unique Dog Characters** - Each with different speeds and personalities
+- **Animated Sprite Sheets** - Smooth running and eating animations
 - **Split-Screen Gameplay** - Compete head-to-head in real-time
 - **1P vs AI Mode** - Challenge the computer with Easy, Medium, or Hard difficulty
 - **2P Local Mode** - Play against a friend on the same keyboard
@@ -91,8 +92,7 @@ python main.py
 - **Dash** (Chihuahua) - Fastest of all!
 - **Lobo** (Husky) - Balanced speed
 - **Rex** (Dachshund) - Slightly above average
-- **Buster** (Beagle) - Well-rounded
-- **Queenie** (Corgi) - Nimble runner
+- **Jazzy** (Chihuahua) - Swift and spirited
 
 ## Project Structure
 
@@ -112,8 +112,10 @@ snack_attack/
 │   ├── core/            # Core systems
 │   ├── entities/        # Game entities (Player, AI, Snack)
 │   ├── screens/         # Game screens (Menu, Gameplay, etc.)
-│   ├── sprites/         # Pixel art generation
+│   ├── sprites/         # Sprite loading and animation
 │   └── audio/           # Audio management
+├── Sprite sheets/       # Character animation sprite sheets
+├── Profile/             # Character profile pictures
 └── screenshots/         # Game screenshots
 ```
 

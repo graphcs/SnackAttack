@@ -71,6 +71,8 @@ class SpriteSheetLoader:
 
     def _get_profile_path(self) -> str:
         """Get the path to profile images folder."""
+        # Profile folder is at: snack_attack/Profile/
+        # This file is at: snack_attack/src/sprites/
         current_dir = os.path.dirname(os.path.abspath(__file__))
         return os.path.join(current_dir, '..', '..', 'Profile')
 

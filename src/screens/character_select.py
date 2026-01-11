@@ -271,6 +271,7 @@ class CharacterSelectScreen(BaseScreen):
 
     def _render_card(self, surface: pygame.Surface, card: CharacterCard) -> None:
         """Render a character card (180x200) for 960x720 display."""
+        from ..sprites.sprite_sheet_loader import SpriteSheetLoader
         from ..sprites.pixel_art import SpriteCache
 
         # Selection state determines border
@@ -292,18 +293,23 @@ class CharacterSelectScreen(BaseScreen):
         pygame.draw.rect(surface, bg_color, card.rect, border_radius=8)
         pygame.draw.rect(surface, border_color, card.rect, border_width, border_radius=8)
 
-        # Get the pixel art portrait and scale to 128x128 for card
-        cache = SpriteCache()
-        portrait = cache.get_dog_portrait(card.character_id)
-        # Scale portrait to fit card (128x128)
-        scaled_portrait = pygame.transform.scale(portrait, (128, 128))
+        # Try to get profile picture from sprite sheet loader first
+        loader = SpriteSheetLoader()
+        portrait = loader.get_portrait(card.character_id)
+
+        # Fallback to procedural portrait if profile picture not available
+        if portrait is None:
+            cache = SpriteCache()
+            portrait = cache.get_dog_portrait(card.character_id)
+            # Scale procedural portrait to 128x128
+            portrait = pygame.transform.scale(portrait, (128, 128))
 
         # Center the portrait in the card
         portrait_x = card.rect.centerx - 64
         portrait_y = card.rect.y + 20
 
         # Draw the portrait
-        surface.blit(scaled_portrait, (portrait_x, portrait_y))
+        surface.blit(portrait, (portrait_x, portrait_y))
 
         # Draw name below portrait
         name_y = card.rect.y + 160

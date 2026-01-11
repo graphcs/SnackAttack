@@ -67,6 +67,9 @@ class AIPlayer(Player):
         self.x = new_x
         self.y = new_y
 
+        # Update animation controller
+        self.animation_controller.update(dt, self.is_moving, self.facing_right)
+
         # Update effects
         self.update_effects(dt)
 
@@ -160,6 +163,7 @@ class AIPlayer(Player):
         if not self.target_position:
             self.velocity_x = 0
             self.velocity_y = 0
+            self.is_moving = False
             return
 
         target_x, target_y = self.target_position
@@ -173,6 +177,7 @@ class AIPlayer(Player):
             # Close enough
             self.velocity_x = 0
             self.velocity_y = 0
+            self.is_moving = False
             return
 
         # Normalize direction
