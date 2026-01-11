@@ -416,6 +416,9 @@ class GameplayScreen(BaseScreen):
         """Handle snack collection."""
         result = snack.collect()
 
+        # Trigger eat animation
+        player.trigger_eat_animation()
+
         # Add score
         player.add_score(result["point_value"])
 

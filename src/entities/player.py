@@ -1,7 +1,11 @@
 """Player entity - controlled by keyboard input."""
 
 import pygame
-from typing import Dict, Any, Tuple, Optional, List
+import time
+from typing import Dict, Any, Tuple, Optional, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..sprites.animation_controller import AnimationController
 
 
 class Player:
@@ -47,6 +51,9 @@ class Player:
         self.facing_right = True
         self.is_moving = False
 
+        # Animation controller (lazy initialization)
+        self._animation_controller: Optional['AnimationController'] = None
+
     @property
     def rect(self) -> pygame.Rect:
         """Get the player's collision rectangle."""
@@ -56,6 +63,18 @@ class Player:
     def center(self) -> Tuple[float, float]:
         """Get the player's center position."""
         return (self.x + self.width / 2, self.y + self.height / 2)
+
+    @property
+    def animation_controller(self) -> 'AnimationController':
+        """Lazy initialization of animation controller."""
+        if self._animation_controller is None:
+            from ..sprites.animation_controller import AnimationController
+            self._animation_controller = AnimationController(self.character_id)
+        return self._animation_controller
+
+    def trigger_eat_animation(self) -> None:
+        """Trigger the eat/attack animation when collecting a snack."""
+        self.animation_controller.trigger_eat_animation()
 
     def get_speed_multiplier(self) -> float:
         """Calculate current speed multiplier from active effects."""
@@ -159,6 +178,9 @@ class Player:
         self.x = new_x
         self.y = new_y
 
+        # Update animation controller
+        self.animation_controller.update(dt, self.is_moving, self.facing_right)
+
         # Update effects
         self.update_effects(dt)
 
@@ -183,26 +205,32 @@ class Player:
         self.is_invincible = False
         self.controls_flipped = False
 
+        # Reset animation state
+        if self._animation_controller is not None:
+            self._animation_controller.reset()
+
     def render(self, surface: pygame.Surface, offset: Tuple[int, int] = (0, 0)) -> None:
         """
-        Render the player using pixel art sprites.
+        Render the player using sprite sheet animations.
 
         Args:
             surface: Surface to render to
             offset: Offset for rendering within arena
         """
-        from ..sprites.pixel_art import SpriteCache
-
         render_x = int(self.x - self.arena_bounds.left + offset[0])
         render_y = int(self.y - self.arena_bounds.top + offset[1])
 
-        # Get the pixel art sprite (64x64 for 960x720 display)
-        cache = SpriteCache()
-        sprite = cache.get_dog_sprite(self.character_id, self.facing_right)
+        # Get current animation frame from animation controller
+        sprite = self.animation_controller.get_current_sprite()
+
+        # Fallback to procedural sprite if animation not available
+        if sprite is None:
+            from ..sprites.pixel_art import SpriteCache
+            cache = SpriteCache()
+            sprite = cache.get_dog_sprite(self.character_id, self.facing_right)
 
         # Handle invincibility flashing
         if self.is_invincible:
-            import time
             if int(time.time() * 10) % 2 == 0:
                 # Create a white-tinted version
                 flash_sprite = sprite.copy()

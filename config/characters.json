@@ -41,20 +41,12 @@
       "hitbox": [60, 48]
     },
     {
-      "id": "buster",
-      "name": "Buster",
-      "breed": "Beagle",
-      "base_speed": 1.0,
-      "color": [255, 252, 248],
-      "hitbox": [52, 52]
-    },
-    {
-      "id": "queenie",
-      "name": "Queenie",
-      "breed": "Corgi",
-      "base_speed": 0.95,
-      "color": [235, 170, 70],
-      "hitbox": [56, 48]
+      "id": "jazzy",
+      "name": "Jazzy",
+      "breed": "Chihuahua",
+      "base_speed": 1.15,
+      "color": [45, 40, 35],
+      "hitbox": [48, 52]
     }
   ]
 }
