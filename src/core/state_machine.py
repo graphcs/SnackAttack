@@ -12,6 +12,7 @@ class GameState(Enum):
     MAIN_MENU = auto()
     CHARACTER_SELECT = auto()
     GAMEPLAY = auto()
+    TREAT_ATTACK = auto()  # New Treat Attack mode
     PAUSED = auto()
     SETTINGS = auto()
     GAME_OVER = auto()

@@ -1,4 +1,4 @@
-"""Main gameplay screen with split-screen support."""
+"""Main gameplay screen with split-screen support and falling treats."""
 
 import pygame
 import random
@@ -11,28 +11,109 @@ from ..entities.ai_player import AIPlayer
 from ..entities.snack import Snack
 
 
+class FallingSnack:
+    """A snack that falls from the top of the arena."""
+
+    def __init__(self, snack_config: Dict[str, Any], x: float, arena_bounds: pygame.Rect,
+                 fall_speed: float = 120):
+        self.snack_id = snack_config.get("id", "pizza")
+        self.name = snack_config.get("name", "Snack")
+        self.point_value = snack_config.get("point_value", 100)
+        self.effect = snack_config.get("effect")
+        self.color = tuple(snack_config.get("color", [255, 255, 255]))
+
+        # Use larger size from sprite loader
+        from ..sprites.sprite_sheet_loader import SpriteSheetLoader
+        self.width = SpriteSheetLoader.FOOD_SIZE[0]
+        self.height = SpriteSheetLoader.FOOD_SIZE[1]
+
+        self.arena_bounds = arena_bounds
+        self.x = x
+        self.y = -self.height  # Start above arena
+        self.fall_speed = fall_speed
+
+        self.active = True
+        self.collected = False
+
+    @property
+    def rect(self) -> pygame.Rect:
+        """Get the snack's collision rectangle."""
+        return pygame.Rect(self.x, self.y, self.width, self.height)
+
+    def update(self, dt: float) -> bool:
+        """Update snack position. Returns False if should be removed."""
+        if not self.active:
+            return False
+
+        self.y += self.fall_speed * dt
+
+        # Remove if fallen below arena
+        if self.y > self.arena_bounds.bottom:
+            self.active = False
+            return False
+
+        return True
+
+    def collect(self) -> Dict[str, Any]:
+        """Mark as collected and return value."""
+        self.active = False
+        self.collected = True
+        return {
+            "snack_id": self.snack_id,
+            "point_value": self.point_value,
+            "effect": self.effect
+        }
+
+    def render(self, surface: pygame.Surface) -> None:
+        """Render the falling snack."""
+        if not self.active:
+            return
+
+        from ..sprites.sprite_sheet_loader import SpriteSheetLoader
+        from ..sprites.pixel_art import SpriteCache
+
+        # Position relative to arena
+        render_x = int(self.x - self.arena_bounds.left)
+        render_y = int(self.y - self.arena_bounds.top)
+
+        # Try to get PNG food sprite first
+        loader = SpriteSheetLoader()
+        sprite = loader.get_food_sprite(self.snack_id)
+
+        # Fall back to procedural sprite if PNG not available
+        if sprite is None:
+            cache = SpriteCache()
+            sprite = cache.get_snack_sprite(self.snack_id)
+
+        surface.blit(sprite, (render_x, render_y))
+
+
 class Arena:
-    """A single player's game arena for 960x720 display."""
+    """A single player's game arena for 800x800 display with falling treats."""
 
     def __init__(self, bounds: pygame.Rect, player: Player, level_config: Dict[str, Any]):
         self.bounds = bounds
         self.player = player
         self.level_config = level_config
-        self.snacks: List[Snack] = []
+        self.snacks: List[FallingSnack] = []
         self.background_color = tuple(level_config.get("background_color", [200, 200, 200]))
 
-        # Spawn settings
+        # Spawn settings for falling treats
         self.spawn_timer = 0.0
-        self.base_spawn_interval = 1.5
+        self.base_spawn_interval = 1.0
         self.spawn_rate_multiplier = level_config.get("spawn_rate_multiplier", 1.0)
         self.snack_pool = level_config.get("snack_pool", ["pizza"])
-        self.max_snacks = 10  # More snacks for larger arena
+        self.max_snacks = 15
+        self.fall_speed = 180  # Faster for larger screen
+
+        # Ground level for player
+        self.ground_y = bounds.bottom - 160  # Player walks on ground near bottom
 
         # Create surface for this arena
         self.surface = pygame.Surface((bounds.width, bounds.height))
 
-    def spawn_snack(self, snack_configs: List[Dict[str, Any]]) -> Optional[Snack]:
-        """Spawn a new snack in the arena."""
+    def spawn_snack(self, snack_configs: List[Dict[str, Any]]) -> Optional[FallingSnack]:
+        """Spawn a new falling snack at the top of the arena."""
         if len(self.snacks) >= self.max_snacks:
             return None
 
@@ -54,15 +135,14 @@ class Arena:
                 selected = snack_config
                 break
 
-        # Random position within arena (with padding for 960x720 display)
-        padding = 40
-        snack_size = 48  # Snack sprite size
+        # Random X position within arena
+        from ..sprites.sprite_sheet_loader import SpriteSheetLoader
+        snack_size = SpriteSheetLoader.FOOD_SIZE[0]
+        padding = 20
         x = random.randint(self.bounds.left + padding,
-                           self.bounds.right - padding - snack_size)
-        y = random.randint(self.bounds.top + padding,
-                           self.bounds.bottom - padding - snack_size)
+                          self.bounds.right - padding - snack_size)
 
-        snack = Snack(selected, (x, y), self.bounds)
+        snack = FallingSnack(selected, x, self.bounds, self.fall_speed)
         self.snacks.append(snack)
         return snack
 
@@ -79,7 +159,7 @@ class Arena:
         self.snacks = [s for s in self.snacks if s.update(dt)]
 
     def render(self) -> pygame.Surface:
-        """Render the arena with wooden floor and fence border for 960x720."""
+        """Render the arena with wooden floor and fence border."""
         from ..sprites.pixel_art import draw_wooden_floor, draw_fence_border
 
         # Draw wooden plank floor
@@ -101,7 +181,7 @@ class Arena:
 
 
 class GameplayScreen(BaseScreen):
-    """Split-screen gameplay screen."""
+    """Split-screen gameplay screen with falling treats."""
 
     def __init__(self, state_machine, config, event_bus):
         super().__init__(state_machine, config, event_bus)
@@ -144,9 +224,9 @@ class GameplayScreen(BaseScreen):
         # Snack configs cache
         self.snack_configs: List[Dict[str, Any]] = []
 
-        # Control key states
-        self.p1_keys = {"up": False, "down": False, "left": False, "right": False}
-        self.p2_keys = {"up": False, "down": False, "left": False, "right": False}
+        # Control key states - horizontal only
+        self.p1_keys = {"left": False, "right": False}
+        self.p2_keys = {"left": False, "right": False}
 
     def on_enter(self, data: Dict[str, Any] = None) -> None:
         """Initialize gameplay."""
@@ -176,23 +256,18 @@ class GameplayScreen(BaseScreen):
         self._start_countdown()
 
     def _setup_arenas(self, p1_char: Dict, p2_char: Dict) -> None:
-        """Set up the game arenas and players for 960x720 display."""
-        # Arena dimensions for 960x720 display (split-screen)
-        # Width: 960 - gap(20) = 940, each arena = 450
-        # Height: 720 - header(70) - hud(60) - margins = ~550
-        arena_width = 450
-        arena_height = 520
-        gap = 20
+        """Set up the game arenas and players for 800x800 display."""
+        # Arena dimensions for 800x800 display (split-screen)
+        gap = 16
+        arena_width = (self.screen_width - gap) // 2
+        arena_height = self.screen_height - 140  # Leave room for header and HUD
 
-        # Calculate positions (centered)
-        total_width = arena_width * 2 + gap
-        start_x = (self.screen_width - total_width) // 2
-        arena_y = 70  # Below header
+        # Calculate positions
+        arena_y = 65  # Below header
 
         # Create arena bounds
-        arena1_bounds = pygame.Rect(start_x, arena_y, arena_width, arena_height)
-        arena2_bounds = pygame.Rect(start_x + arena_width + gap, arena_y,
-                                    arena_width, arena_height)
+        arena1_bounds = pygame.Rect(0, arena_y, arena_width, arena_height)
+        arena2_bounds = pygame.Rect(arena_width + gap, arena_y, arena_width, arena_height)
 
         # Get level config
         level_config = self.config.get_level(self.current_level)
@@ -202,19 +277,24 @@ class GameplayScreen(BaseScreen):
 
         self.round_duration = level_config.get("round_duration_seconds", 60)
 
-        # Create player 1
-        self.player1 = Player(p1_char, arena1_bounds, player_num=1)
+        # Create player 1 - horizontal movement only
+        self.player1 = Player(p1_char, arena1_bounds, player_num=1, horizontal_only=True)
 
-        # Create player 2 (AI or human)
+        # Create player 2 (AI or human) - horizontal movement only
         if self.vs_ai:
             difficulty_config = self.config.get_difficulty(self.difficulty)
-            self.player2 = AIPlayer(p2_char, arena2_bounds, difficulty_config)
+            self.player2 = AIPlayer(p2_char, arena2_bounds, difficulty_config, horizontal_only=True)
         else:
-            self.player2 = Player(p2_char, arena2_bounds, player_num=2)
+            self.player2 = Player(p2_char, arena2_bounds, player_num=2, horizontal_only=True)
 
         # Create arenas
         self.arena1 = Arena(arena1_bounds, self.player1, level_config)
         self.arena2 = Arena(arena2_bounds, self.player2, level_config)
+
+        # Position players at ground level (offset for larger sprites)
+        ground_offset = 160
+        self.player1.y = arena1_bounds.bottom - ground_offset
+        self.player2.y = arena2_bounds.bottom - ground_offset
 
     def _start_countdown(self) -> None:
         """Start the pre-round countdown."""
@@ -231,6 +311,11 @@ class GameplayScreen(BaseScreen):
         self.arena1.snacks.clear()
         self.arena2.snacks.clear()
 
+        # Reset player positions to ground
+        ground_offset = 160
+        self.player1.y = self.arena1.bounds.bottom - ground_offset
+        self.player2.y = self.arena2.bounds.bottom - ground_offset
+
     def _end_round(self) -> None:
         """End the current round."""
         self.round_active = False
@@ -240,7 +325,6 @@ class GameplayScreen(BaseScreen):
             self.p1_round_wins += 1
         elif self.player2.score > self.player1.score:
             self.p2_round_wins += 1
-        # Tie = no one wins the round
 
         # Check for game over
         wins_needed = (self.max_rounds // 2) + 1
@@ -262,6 +346,11 @@ class GameplayScreen(BaseScreen):
                 self.arena1.background_color = tuple(level_config.get("background_color", [200, 200, 200]))
                 self.arena2.background_color = tuple(level_config.get("background_color", [200, 200, 200]))
                 self.round_duration = level_config.get("round_duration_seconds", 60)
+                # Increase difficulty
+                self.arena1.fall_speed = 180 + (self.current_level - 1) * 30
+                self.arena2.fall_speed = 180 + (self.current_level - 1) * 30
+                self.arena1.base_spawn_interval = max(0.5, 1.0 - (self.current_level - 1) * 0.15)
+                self.arena2.base_spawn_interval = max(0.5, 1.0 - (self.current_level - 1) * 0.15)
             self._start_countdown()
 
     def _end_game(self) -> None:
@@ -305,49 +394,46 @@ class GameplayScreen(BaseScreen):
             self._handle_key_up(event.key)
 
     def _handle_key_down(self, key: int) -> None:
-        """Handle key press."""
+        """Handle key press - horizontal only."""
         # Player 1 controls (WASD)
-        if key == pygame.K_w:
-            self.p1_keys["up"] = True
-        elif key == pygame.K_s:
-            self.p1_keys["down"] = True
-        elif key == pygame.K_a:
+        if key == pygame.K_a:
             self.p1_keys["left"] = True
         elif key == pygame.K_d:
             self.p1_keys["right"] = True
 
-        # Player 2 controls (Arrow keys) - only for 2P mode
-        if not self.vs_ai:
-            if key == pygame.K_UP:
-                self.p2_keys["up"] = True
-            elif key == pygame.K_DOWN:
-                self.p2_keys["down"] = True
-            elif key == pygame.K_LEFT:
+        # In 1P mode, arrow keys also control player 1
+        if self.vs_ai:
+            if key == pygame.K_LEFT:
+                self.p1_keys["left"] = True
+            elif key == pygame.K_RIGHT:
+                self.p1_keys["right"] = True
+        else:
+            # Player 2 controls (Arrow keys) - only for 2P mode
+            if key == pygame.K_LEFT:
                 self.p2_keys["left"] = True
             elif key == pygame.K_RIGHT:
                 self.p2_keys["right"] = True
 
     def _handle_key_up(self, key: int) -> None:
-        """Handle key release."""
+        """Handle key release - horizontal only."""
         # Player 1 controls
-        if key == pygame.K_w:
-            self.p1_keys["up"] = False
-        elif key == pygame.K_s:
-            self.p1_keys["down"] = False
-        elif key == pygame.K_a:
+        if key == pygame.K_a:
             self.p1_keys["left"] = False
         elif key == pygame.K_d:
             self.p1_keys["right"] = False
 
-        # Player 2 controls
-        if key == pygame.K_UP:
-            self.p2_keys["up"] = False
-        elif key == pygame.K_DOWN:
-            self.p2_keys["down"] = False
-        elif key == pygame.K_LEFT:
-            self.p2_keys["left"] = False
-        elif key == pygame.K_RIGHT:
-            self.p2_keys["right"] = False
+        # In 1P mode, arrow keys also control player 1
+        if self.vs_ai:
+            if key == pygame.K_LEFT:
+                self.p1_keys["left"] = False
+            elif key == pygame.K_RIGHT:
+                self.p1_keys["right"] = False
+        else:
+            # Player 2 controls
+            if key == pygame.K_LEFT:
+                self.p2_keys["left"] = False
+            elif key == pygame.K_RIGHT:
+                self.p2_keys["right"] = False
 
     def update(self, dt: float) -> None:
         """Update gameplay state."""
@@ -379,7 +465,7 @@ class GameplayScreen(BaseScreen):
             if self.shake_duration <= 0:
                 self.shake_intensity = 0
 
-        # Update players
+        # Update players - horizontal only keys
         self.player1.handle_input(self.p1_keys)
         self.player1.update(dt)
 
@@ -389,7 +475,7 @@ class GameplayScreen(BaseScreen):
             self.player2.handle_input(self.p2_keys)
             self.player2.update(dt)
 
-        # Update arenas (spawns snacks)
+        # Update arenas (spawns falling snacks)
         self.arena1.update(dt, self.snack_configs)
         self.arena2.update(dt, self.snack_configs)
 
@@ -412,7 +498,7 @@ class GameplayScreen(BaseScreen):
             if self.player2.rect.colliderect(snack.rect):
                 self._collect_snack(self.player2, snack)
 
-    def _collect_snack(self, player: Player, snack: Snack) -> None:
+    def _collect_snack(self, player: Player, snack: FallingSnack) -> None:
         """Handle snack collection."""
         result = snack.collect()
 
@@ -437,14 +523,13 @@ class GameplayScreen(BaseScreen):
                 self.shake_duration = effect["duration_seconds"]
 
     def render(self, surface: pygame.Surface) -> None:
-        """Render the gameplay screen to 960x720 display."""
+        """Render the gameplay screen to 800x800 display."""
         surface.fill(self.bg_color)
 
         # Apply screen shake offset
         shake_x = 0
         shake_y = 0
         if self.shake_intensity > 0:
-            import random
             shake_x = random.randint(-int(self.shake_intensity), int(self.shake_intensity))
             shake_y = random.randint(-int(self.shake_intensity), int(self.shake_intensity))
 
@@ -476,38 +561,38 @@ class GameplayScreen(BaseScreen):
             self._render_pause(surface)
 
     def _render_header(self, surface: pygame.Surface) -> None:
-        """Render the game header for 960x720 display."""
+        """Render the game header for 800x800 display."""
         # Header bar
-        header_height = 60
+        header_height = 55
         pygame.draw.rect(surface, (40, 80, 40), (0, 0, self.screen_width, header_height))
         pygame.draw.rect(surface, (60, 120, 60), (0, 0, self.screen_width, header_height), 2)
 
         # Title centered
         self.draw_text(surface, "JAZZY'S SNACK ATTACK", self.title_font,
-                       (255, 220, 80), (self.screen_width // 2, 30))
+                       (255, 220, 80), (self.screen_width // 2, 28))
 
         # Timer on right
         if self.round_active:
             timer_text = f"{int(self.round_timer)}s"
             timer_color = (255, 100, 100) if self.round_timer < 10 else (255, 255, 200)
             self.draw_text(surface, timer_text, self.menu_font, timer_color,
-                           (self.screen_width - 60, 30))
+                           (self.screen_width - 50, 28))
 
         # Round info on left
-        round_text = f"Round {self.current_round}"
+        round_text = f"R{self.current_round}"
         self.draw_text(surface, round_text, self.menu_font,
-                       (200, 200, 150), (100, 22))
+                       (200, 200, 150), (40, 20))
 
         # Wins indicator
-        wins_text = f"Wins: {self.p1_round_wins} - {self.p2_round_wins}"
+        wins_text = f"{self.p1_round_wins}-{self.p2_round_wins}"
         self.draw_text(surface, wins_text, self.small_font,
-                       (255, 255, 200), (100, 45))
+                       (255, 255, 200), (40, 42))
 
     def _render_player_hud(self, surface: pygame.Surface, player: Player,
                            arena_bounds: pygame.Rect, label: str) -> None:
-        """Render a player HUD below arena for 960x720."""
-        hud_y = arena_bounds.bottom + 8
-        hud_height = 50
+        """Render a player HUD below arena for 800x800."""
+        hud_y = arena_bounds.bottom + 5
+        hud_height = 45
         hud_width = arena_bounds.width
 
         # HUD background box
@@ -515,40 +600,40 @@ class GameplayScreen(BaseScreen):
         dark_color = (color[0] // 3, color[1] // 3, color[2] // 3)
 
         hud_rect = pygame.Rect(arena_bounds.x, hud_y, hud_width, hud_height)
-        pygame.draw.rect(surface, dark_color, hud_rect, border_radius=8)
-        pygame.draw.rect(surface, color, hud_rect, 3, border_radius=8)
+        pygame.draw.rect(surface, dark_color, hud_rect, border_radius=6)
+        pygame.draw.rect(surface, color, hud_rect, 2, border_radius=6)
 
         # Player label and name on left
-        self.draw_text(surface, f"{label}: {player.name}", self.menu_font, (255, 255, 255),
-                       (arena_bounds.x + 20, hud_y + 25), center=False)
+        self.draw_text(surface, f"{label}: {player.name}", self.small_font, (255, 255, 255),
+                       (arena_bounds.x + 10, hud_y + 22), center=False)
 
         # Score on right
-        score_text = f"Score: {player.score}"
+        score_text = f"{player.score}"
         self.draw_text(surface, score_text, self.menu_font, (255, 220, 100),
-                       (arena_bounds.right - 150, hud_y + 25), center=False)
+                       (arena_bounds.right - 60, hud_y + 22), center=False)
 
     def _render_countdown(self, surface: pygame.Surface) -> None:
-        """Render the countdown overlay for 960x720."""
+        """Render the countdown overlay for 800x800."""
         # Semi-transparent overlay
         overlay = pygame.Surface((self.screen_width, self.screen_height))
         overlay.fill((0, 0, 0))
         overlay.set_alpha(150)
         surface.blit(overlay, (0, 0))
 
-        # Countdown number (larger font for full screen)
+        # Countdown number
         if self.countdown > 0:
             text = str(self.countdown)
         else:
             text = "GO!"
 
         # Draw large countdown text
-        large_font = pygame.font.Font(None, 200)
+        large_font = pygame.font.Font(None, 180)
         text_surface = large_font.render(text, True, (255, 200, 0))
         text_rect = text_surface.get_rect(center=(self.screen_width // 2, self.screen_height // 2))
         surface.blit(text_surface, text_rect)
 
     def _render_pause(self, surface: pygame.Surface) -> None:
-        """Render the pause overlay for 960x720."""
+        """Render the pause overlay for 800x800."""
         # Semi-transparent overlay
         overlay = pygame.Surface((self.screen_width, self.screen_height))
         overlay.fill((0, 0, 0))

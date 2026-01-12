@@ -21,10 +21,10 @@ class SpriteSheetLoader:
     # Sprite sheet configuration
     FRAME_COUNT = 3  # 3 frames per animation
 
-    # Target gameplay sprite size
-    GAMEPLAY_SIZE = (64, 64)
-    PORTRAIT_SIZE = (128, 128)
-    FOOD_SIZE = (48, 48)  # Snack sprite size
+    # Target gameplay sprite size - large for good visibility
+    GAMEPLAY_SIZE = (144, 144)
+    PORTRAIT_SIZE = (160, 160)
+    FOOD_SIZE = (80, 80)  # Snack sprite size - larger for visibility
 
     # Animation timing (in seconds)
     RUN_FRAME_DURATION = 0.1      # 10 FPS for run cycle

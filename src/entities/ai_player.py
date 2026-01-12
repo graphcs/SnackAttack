@@ -5,14 +5,14 @@ import random
 import math
 from typing import Dict, Any, List, Optional, Tuple
 from .player import Player
-from .snack import Snack
+from typing import Union
 
 
 class AIPlayer(Player):
     """An AI-controlled dog character."""
 
     def __init__(self, character_config: Dict[str, Any], arena_bounds: pygame.Rect,
-                 difficulty_config: Dict[str, Any]):
+                 difficulty_config: Dict[str, Any], horizontal_only: bool = False):
         """
         Initialize an AI player.
 
@@ -20,8 +20,9 @@ class AIPlayer(Player):
             character_config: Character configuration from characters.json
             arena_bounds: The playable area boundaries
             difficulty_config: AI difficulty settings
+            horizontal_only: If True, only allow horizontal movement
         """
-        super().__init__(character_config, arena_bounds, player_num=2)
+        super().__init__(character_config, arena_bounds, player_num=2, horizontal_only=horizontal_only)
 
         # AI settings from config
         self.reaction_delay = difficulty_config.get("reaction_delay_ms", 250) / 1000.0
@@ -32,10 +33,10 @@ class AIPlayer(Player):
 
         # AI state
         self.decision_timer = 0.0
-        self.current_target: Optional[Snack] = None
+        self.current_target: Optional[Any] = None
         self.target_position: Optional[Tuple[float, float]] = None
 
-    def update(self, dt: float, snacks: List[Snack] = None) -> None:
+    def update(self, dt: float, snacks: List[Any] = None) -> None:
         """
         Update AI player.
 
@@ -78,21 +79,28 @@ class AIPlayer(Player):
             self.current_target = None
             self.target_position = None
 
-    def make_decision(self, snacks: List[Snack]) -> None:
+    def make_decision(self, snacks: List[Any]) -> None:
         """
         Decide which snack to target.
 
         Args:
-            snacks: List of available snacks
+            snacks: List of available snacks (Snack or FallingSnack objects)
         """
         if not snacks:
             self.current_target = None
             self.target_position = None
-            # Wander randomly (smaller padding for 320x240 world)
-            self.target_position = (
-                random.randint(self.arena_bounds.left + 10, self.arena_bounds.right - 10),
-                random.randint(self.arena_bounds.top + 10, self.arena_bounds.bottom - 10)
-            )
+            # Wander randomly within arena
+            if self.horizontal_only:
+                # Only wander horizontally
+                self.target_position = (
+                    random.randint(self.arena_bounds.left + 20, self.arena_bounds.right - 20),
+                    self.y + self.height // 2  # Stay at current Y
+                )
+            else:
+                self.target_position = (
+                    random.randint(self.arena_bounds.left + 10, self.arena_bounds.right - 10),
+                    random.randint(self.arena_bounds.top + 10, self.arena_bounds.bottom - 10)
+                )
             return
 
         # Filter active snacks
@@ -118,14 +126,21 @@ class AIPlayer(Player):
             self.current_target = scored_snacks[0][0]
 
         if self.current_target:
-            self.target_position = self.current_target.center
+            # Get center position - handle both Snack and FallingSnack
+            if hasattr(self.current_target, 'center'):
+                self.target_position = self.current_target.center
+            else:
+                self.target_position = (
+                    self.current_target.x + self.current_target.width / 2,
+                    self.current_target.y + self.current_target.height / 2
+                )
 
-    def evaluate_snack(self, snack: Snack) -> float:
+    def evaluate_snack(self, snack: Any) -> float:
         """
         Score a snack's desirability.
 
         Args:
-            snack: Snack to evaluate
+            snack: Snack to evaluate (Snack or FallingSnack)
 
         Returns:
             Desirability score (higher is better)
@@ -138,23 +153,36 @@ class AIPlayer(Player):
         dy = snack.y - self.y
         distance = math.sqrt(dx * dx + dy * dy)
 
+        # For horizontal mode, prioritize snacks that are reachable (closer in Y)
+        if self.horizontal_only:
+            # Heavy penalty for snacks far above (we can't reach them yet)
+            if snack.y < self.y - 50:
+                score -= 200
+            # Bonus for snacks at our level or below (about to pass us)
+            elif snack.y >= self.y:
+                score += 100
+
         # Closer snacks are better (distance penalty)
-        score -= distance * 0.5
+        score -= abs(dx) * 0.5  # Horizontal distance matters most
 
         # Handle penalties (broccoli)
         if snack.point_value < 0 and self.avoids_penalties:
             score -= 300  # Strong penalty
 
         # Bonus for power-ups
-        if snack.effect and self.targets_powerups:
-            if snack.effect.get("type") == "speed_boost":
+        effect = getattr(snack, 'effect', None)
+        if effect and self.targets_powerups:
+            effect_type = effect.get("type") if isinstance(effect, dict) else None
+            if effect_type == "speed_boost":
                 score += 100
-            elif snack.effect.get("type") == "invincibility":
+            elif effect_type == "invincibility":
                 score += 150
 
-        # Consider time remaining (prioritize snacks about to despawn)
-        time_bonus = max(0, 5 - snack.time_alive) * 10
-        score += time_bonus
+        # Consider time remaining for static snacks (prioritize snacks about to despawn)
+        time_alive = getattr(snack, 'time_alive', 0)
+        if time_alive:
+            time_bonus = max(0, 5 - time_alive) * 10
+            score += time_bonus
 
         return score
 
@@ -170,7 +198,7 @@ class AIPlayer(Player):
         center_x, center_y = self.center
 
         dx = target_x - center_x
-        dy = target_y - center_y
+        dy = target_y - center_y if not self.horizontal_only else 0
         distance = math.sqrt(dx * dx + dy * dy)
 
         if distance < 5:
@@ -181,13 +209,15 @@ class AIPlayer(Player):
             return
 
         # Normalize direction
-        dx /= distance
-        dy /= distance
+        if distance > 0:
+            dx /= distance
+            dy /= distance
 
         # Apply pathfinding inefficiency (add some randomness)
         if random.random() > self.pathfinding_efficiency:
             dx += random.uniform(-0.3, 0.3)
-            dy += random.uniform(-0.3, 0.3)
+            if not self.horizontal_only:
+                dy += random.uniform(-0.3, 0.3)
             # Re-normalize
             length = math.sqrt(dx * dx + dy * dy)
             if length > 0:
@@ -203,7 +233,7 @@ class AIPlayer(Player):
         speed = self.base_move_speed * self.base_speed * self.get_speed_multiplier()
 
         self.velocity_x = dx * speed
-        self.velocity_y = dy * speed
+        self.velocity_y = dy * speed if not self.horizontal_only else 0
 
         # Update facing direction
         if dx > 0:
@@ -211,7 +241,7 @@ class AIPlayer(Player):
         elif dx < 0:
             self.facing_right = False
 
-        self.is_moving = True
+        self.is_moving = abs(dx) > 0.1 or (not self.horizontal_only and abs(dy) > 0.1)
 
     def handle_input(self, keys_pressed: Dict[str, bool]) -> None:
         """AI doesn't use keyboard input - override to do nothing."""

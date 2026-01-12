@@ -1,0 +1,69 @@
+{
+  "screen": {
+    "width": 720,
+    "height": 720,
+    "title": "Treat Attack"
+  },
+  "gameplay": {
+    "round_duration_seconds": 60,
+    "base_fall_speed": 150,
+    "fall_speed_increase_per_level": 20,
+    "spawn_interval_seconds": 1.5,
+    "min_spawn_interval_seconds": 0.5
+  },
+  "dog": {
+    "ground_y": 650,
+    "width": 64,
+    "height": 64,
+    "move_speed": 300,
+    "leash_anchor_x": 0
+  },
+  "leash": {
+    "default_min_x": 50,
+    "default_max_x": 550,
+    "extended_max_x": 670,
+    "yanked_max_x": 350,
+    "effect_duration_seconds": 5.0
+  },
+  "treats": {
+    "types": [
+      {
+        "id": "normal",
+        "name": "Normal Treat",
+        "point_value": 100,
+        "spawn_weight": 60,
+        "color": [255, 210, 80]
+      },
+      {
+        "id": "power",
+        "name": "Power Treat",
+        "point_value": 500,
+        "spawn_weight": 15,
+        "spawn_bias_right": true,
+        "color": [255, 215, 0]
+      },
+      {
+        "id": "bad",
+        "name": "Bad Treat",
+        "point_value": -200,
+        "spawn_weight": 25,
+        "color": [100, 150, 100]
+      }
+    ],
+    "size": [48, 48]
+  },
+  "voting": {
+    "window_duration_seconds": 10,
+    "cooldown_seconds": 5,
+    "commands": {
+      "extend": ["!extend", "!help"],
+      "yank": ["!yank", "!hinder"]
+    }
+  },
+  "ui": {
+    "meter_height": 40,
+    "meter_margin": 10,
+    "score_font_size": 32,
+    "timer_font_size": 28
+  }
+}

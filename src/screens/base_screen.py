@@ -10,9 +10,9 @@ if TYPE_CHECKING:
     from ..core.event_bus import EventBus
 
 
-# Display dimensions - high quality with detailed retro pixel art
-SCREEN_WIDTH = 960
-SCREEN_HEIGHT = 720
+# Display dimensions - 1:1 aspect ratio, sized to fill monitor height
+SCREEN_WIDTH = 1000
+SCREEN_HEIGHT = 1000
 
 
 class BaseScreen(ABC):

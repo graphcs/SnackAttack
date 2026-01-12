@@ -10,14 +10,15 @@ from .core.state_machine import StateMachine, GameState
 from .screens.main_menu import MainMenuScreen
 from .screens.character_select import CharacterSelectScreen
 from .screens.gameplay import GameplayScreen
+from .screens.treat_attack_gameplay import TreatAttackGameplay
 from .screens.settings import SettingsScreen
 from .screens.game_over import GameOverScreen
 from .audio.audio_manager import AudioManager
 
 
-# Display dimensions - high quality with detailed retro pixel art
-DISPLAY_WIDTH = 960
-DISPLAY_HEIGHT = 720
+# Display dimensions - 1:1 aspect ratio, sized to fill monitor height
+DISPLAY_WIDTH = 1000
+DISPLAY_HEIGHT = 1000
 
 
 class Game:
@@ -69,6 +70,7 @@ class Game:
         main_menu = MainMenuScreen(self.state_machine, self.config, self.event_bus)
         character_select = CharacterSelectScreen(self.state_machine, self.config, self.event_bus)
         gameplay = GameplayScreen(self.state_machine, self.config, self.event_bus)
+        treat_attack = TreatAttackGameplay(self.state_machine, self.config, self.event_bus)
         settings = SettingsScreen(self.state_machine, self.config, self.event_bus)
         game_over = GameOverScreen(self.state_machine, self.config, self.event_bus)
 
@@ -76,6 +78,7 @@ class Game:
         self.state_machine.register_state(GameState.MAIN_MENU, main_menu)
         self.state_machine.register_state(GameState.CHARACTER_SELECT, character_select)
         self.state_machine.register_state(GameState.GAMEPLAY, gameplay)
+        self.state_machine.register_state(GameState.TREAT_ATTACK, treat_attack)
         self.state_machine.register_state(GameState.SETTINGS, settings)
         self.state_machine.register_state(GameState.GAME_OVER, game_over)
 

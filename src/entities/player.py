@@ -12,7 +12,7 @@ class Player:
     """A player-controlled dog character."""
 
     def __init__(self, character_config: Dict[str, Any], arena_bounds: pygame.Rect,
-                 player_num: int = 1):
+                 player_num: int = 1, horizontal_only: bool = False):
         """
         Initialize a player.
 
@@ -20,24 +20,28 @@ class Player:
             character_config: Character configuration from characters.json
             arena_bounds: The playable area boundaries
             player_num: Player number (1 or 2)
+            horizontal_only: If True, only allow horizontal movement
         """
         self.character_id = character_config.get("id", "unknown")
         self.name = character_config.get("name", "Unknown")
         self.base_speed = character_config.get("base_speed", 1.0)
         self.color = tuple(character_config.get("color", [255, 255, 255]))
-        hitbox = character_config.get("hitbox", [32, 32])
-        self.width = hitbox[0]
-        self.height = hitbox[1]
+
+        # Use larger sprite size from SpriteSheetLoader
+        from ..sprites.sprite_sheet_loader import SpriteSheetLoader
+        self.width = SpriteSheetLoader.GAMEPLAY_SIZE[0]
+        self.height = SpriteSheetLoader.GAMEPLAY_SIZE[1]
 
         self.arena_bounds = arena_bounds
         self.player_num = player_num
+        self.horizontal_only = horizontal_only
 
-        # Position (center of arena)
+        # Position (center of arena horizontally)
         self.x = arena_bounds.centerx - self.width // 2
         self.y = arena_bounds.centery - self.height // 2
 
-        # Movement (scaled for 960x720 display)
-        self.base_move_speed = 240  # pixels per second (for full resolution)
+        # Movement - faster for larger screen
+        self.base_move_speed = 350  # pixels per second
         self.velocity_x = 0
         self.velocity_y = 0
 
@@ -134,10 +138,12 @@ class Player:
         dx = 0
         dy = 0
 
-        if keys_pressed.get("up", False):
-            dy = -1
-        if keys_pressed.get("down", False):
-            dy = 1
+        if not self.horizontal_only:
+            if keys_pressed.get("up", False):
+                dy = -1
+            if keys_pressed.get("down", False):
+                dy = 1
+
         if keys_pressed.get("left", False):
             dx = -1
         if keys_pressed.get("right", False):
@@ -148,14 +154,14 @@ class Player:
             dx = -dx
             dy = -dy
 
-        # Normalize diagonal movement
-        if dx != 0 and dy != 0:
+        # Normalize diagonal movement (only if not horizontal_only)
+        if not self.horizontal_only and dx != 0 and dy != 0:
             dx *= 0.707  # 1/sqrt(2)
             dy *= 0.707
 
         speed = self.base_move_speed * self.base_speed * self.get_speed_multiplier()
         self.velocity_x = dx * speed
-        self.velocity_y = dy * speed
+        self.velocity_y = dy * speed if not self.horizontal_only else 0
 
         # Update facing direction
         if dx > 0:
@@ -163,7 +169,7 @@ class Player:
         elif dx < 0:
             self.facing_right = False
 
-        self.is_moving = dx != 0 or dy != 0
+        self.is_moving = dx != 0 or (not self.horizontal_only and dy != 0)
 
     def update(self, dt: float) -> None:
         """Update player position and state."""

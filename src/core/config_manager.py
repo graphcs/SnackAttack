@@ -31,7 +31,8 @@ class ConfigManager:
             "levels",
             "ai_difficulty",
             "audio_settings",
-            "controls"
+            "controls",
+            "treat_attack_settings"
         ]
 
         for config_name in config_files:
