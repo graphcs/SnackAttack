@@ -10,9 +10,10 @@ if TYPE_CHECKING:
     from ..core.event_bus import EventBus
 
 
-# Display dimensions - 1:1 aspect ratio, sized to fill monitor height
-SCREEN_WIDTH = 1000
+# Display dimensions - wider for chat simulator panel
+SCREEN_WIDTH = 1200
 SCREEN_HEIGHT = 1000
+GAME_AREA_WIDTH = 1000  # Main game area width (two arenas side by side)
 
 
 class BaseScreen(ABC):

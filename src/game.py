@@ -16,8 +16,8 @@ from .screens.game_over import GameOverScreen
 from .audio.audio_manager import AudioManager
 
 
-# Display dimensions - 1:1 aspect ratio, sized to fill monitor height
-DISPLAY_WIDTH = 1000
+# Display dimensions - wider for chat simulator panel
+DISPLAY_WIDTH = 1200
 DISPLAY_HEIGHT = 1000
 
 

@@ -51,6 +51,18 @@ class Player:
         self.is_invincible = False
         self.controls_flipped = False
 
+        # Leash system - controls horizontal movement boundaries
+        self.leash_base_min_x = arena_bounds.left
+        self.leash_base_max_x = arena_bounds.right - self.width
+        self.leash_min_x = self.leash_base_min_x
+        self.leash_max_x = self.leash_base_max_x
+        self.leash_effect_timer = 0.0
+        self.leash_effect_duration = 8.0  # seconds (longer to see the effect)
+        # Calculate arena width for dramatic effects
+        arena_width = arena_bounds.width
+        self.leash_extend_amount = int(arena_width * 0.15)  # Extend 15% more
+        self.leash_yank_amount = int(arena_width * 0.35)  # Restrict by 35% (very noticeable!)
+
         # Animation state
         self.facing_right = True
         self.is_moving = False
@@ -173,12 +185,18 @@ class Player:
 
     def update(self, dt: float) -> None:
         """Update player position and state."""
+        # Update leash effect timer
+        if self.leash_effect_timer > 0:
+            self.leash_effect_timer -= dt
+            if self.leash_effect_timer <= 0:
+                self.reset_leash()
+
         # Update position
         new_x = self.x + self.velocity_x * dt
         new_y = self.y + self.velocity_y * dt
 
-        # Clamp to arena bounds
-        new_x = max(self.arena_bounds.left, min(new_x, self.arena_bounds.right - self.width))
+        # Clamp to leash bounds (horizontal) and arena bounds (vertical)
+        new_x = max(self.leash_min_x, min(new_x, self.leash_max_x))
         new_y = max(self.arena_bounds.top, min(new_y, self.arena_bounds.bottom - self.height))
 
         self.x = new_x
@@ -189,6 +207,45 @@ class Player:
 
         # Update effects
         self.update_effects(dt)
+
+    def extend_leash(self, cross_arena_max_x: int = None) -> None:
+        """Extend the leash, allowing more movement range.
+
+        Args:
+            cross_arena_max_x: If provided, allows dog to cross into other arena up to this x position
+        """
+        if cross_arena_max_x is not None:
+            # Allow crossing into other arena!
+            self.leash_max_x = cross_arena_max_x
+        else:
+            self.leash_max_x = self.leash_base_max_x + self.leash_extend_amount
+        self.leash_effect_timer = self.leash_effect_duration
+
+    def yank_leash(self) -> None:
+        """Yank the leash, restricting movement range."""
+        # Calculate restricted max_x (can't go below min_x + some minimum space)
+        min_range = self.width * 2  # At least 2 dog widths of movement
+        self.leash_max_x = max(
+            self.leash_base_max_x - self.leash_yank_amount,
+            self.leash_min_x + min_range
+        )
+        self.leash_effect_timer = self.leash_effect_duration
+
+    def reset_leash(self) -> None:
+        """Reset leash to default boundaries."""
+        self.leash_min_x = self.leash_base_min_x
+        self.leash_max_x = self.leash_base_max_x
+        self.leash_effect_timer = 0.0
+
+    def get_leash_state(self) -> str:
+        """Get current leash state for visual feedback."""
+        if self.leash_effect_timer <= 0:
+            return "normal"
+        elif self.leash_max_x > self.leash_base_max_x:
+            return "extended"
+        elif self.leash_max_x < self.leash_base_max_x:
+            return "yanked"
+        return "normal"
 
     def add_score(self, points: int) -> None:
         """Add points to the player's score."""
@@ -210,6 +267,7 @@ class Player:
         self.active_effects.clear()
         self.is_invincible = False
         self.controls_flipped = False
+        self.reset_leash()
 
         # Reset animation state
         if self._animation_controller is not None:
