@@ -15,7 +15,7 @@ class FallingSnack:
     """A snack that falls from the top of the arena."""
 
     def __init__(self, snack_config: Dict[str, Any], x: float, arena_bounds: pygame.Rect,
-                 fall_speed: float = 120):
+                 fall_speed: float = 120, ground_y: float = None):
         self.snack_id = snack_config.get("id", "pizza")
         self.name = snack_config.get("name", "Snack")
         self.point_value = snack_config.get("point_value", 100)
@@ -29,8 +29,11 @@ class FallingSnack:
 
         self.arena_bounds = arena_bounds
         self.x = x
-        self.y = -self.height  # Start above arena
+        self.y = arena_bounds.top - self.height  # Start just above arena
         self.fall_speed = fall_speed
+
+        # Ground level where snacks disappear (at player's feet level)
+        self.ground_y = ground_y if ground_y else arena_bounds.bottom - 20
 
         self.active = True
         self.collected = False
@@ -47,8 +50,8 @@ class FallingSnack:
 
         self.y += self.fall_speed * dt
 
-        # Remove if fallen below arena
-        if self.y > self.arena_bounds.bottom:
+        # Remove if fallen past ground level (where player stands)
+        if self.y > self.ground_y:
             self.active = False
             return False
 
@@ -106,8 +109,10 @@ class Arena:
         self.max_snacks = 15
         self.fall_speed = 180  # Faster for larger screen
 
-        # Ground level for player
-        self.ground_y = bounds.bottom - 160  # Player walks on ground near bottom
+        # Ground level where snacks disappear (at player's feet)
+        # Player top is at bounds.bottom - 160, player is 144 tall
+        # So player bottom (feet) is at bounds.bottom - 160 + 144 = bounds.bottom - 16
+        self.ground_y = bounds.bottom - 16
 
         # Create surface for this arena
         self.surface = pygame.Surface((bounds.width, bounds.height))
@@ -142,7 +147,7 @@ class Arena:
         x = random.randint(self.bounds.left + padding,
                           self.bounds.right - padding - snack_size)
 
-        snack = FallingSnack(selected, x, self.bounds, self.fall_speed)
+        snack = FallingSnack(selected, x, self.bounds, self.fall_speed, self.ground_y)
         self.snacks.append(snack)
         return snack
 
