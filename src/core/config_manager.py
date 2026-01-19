@@ -32,7 +32,8 @@ class ConfigManager:
             "ai_difficulty",
             "audio_settings",
             "controls",
-            "treat_attack_settings"
+            "treat_attack_settings",
+            "twitch_config"
         ]
 
         for config_name in config_files:
@@ -128,3 +129,7 @@ class ConfigManager:
         if "audio_settings" in self._configs:
             self._configs["audio_settings"][key] = value
             self.save_audio_settings()
+
+    def get_twitch_config(self) -> Dict:
+        """Get Twitch integration configuration."""
+        return self.get_config("twitch_config")

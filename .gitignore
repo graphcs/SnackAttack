@@ -34,3 +34,6 @@ Thumbs.db
 
 # Character preview images (generated)
 character_previews/
+
+# Environment secrets (Twitch tokens, etc.)
+.env

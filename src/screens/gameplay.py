@@ -1,14 +1,17 @@
 """Main gameplay screen with split-screen support and falling treats."""
 
+import os
 import pygame
 import random
 from typing import Dict, Any, List, Optional
 from .base_screen import BaseScreen, GAME_AREA_WIDTH
 from ..core.state_machine import GameState
 from ..core.event_bus import GameEvent
+from ..core.env_loader import load_env, get_twitch_token
 from ..entities.player import Player
 from ..entities.ai_player import AIPlayer
 from ..entities.snack import Snack
+from ..interaction.twitch_chat import TwitchChatManager, TWITCH_VOTE_EVENT
 
 
 class FallingSnack:
@@ -605,6 +608,7 @@ class GameplayScreen(BaseScreen):
         self.voting_system: Optional[VotingSystem] = None
         self.voting_meter: Optional[VotingMeter] = None
         self.chat_simulator: Optional[ChatSimulator] = None
+        self.twitch_manager: Optional[TwitchChatManager] = None
 
         # Game area width (1000px, rest is chat panel)
         self.game_area_width = GAME_AREA_WIDTH
@@ -709,8 +713,38 @@ class GameplayScreen(BaseScreen):
             self.game_area_width, 0, panel_width, self.screen_height
         )
         self.chat_simulator.add_message("System", "Welcome!", (200, 200, 100))
-        self.chat_simulator.add_message("System", "Click !extend or", (150, 150, 150))
-        self.chat_simulator.add_message("System", "!yank to vote!", (150, 150, 150))
+
+        # Try to connect to Twitch if configured
+        load_env()  # Load .env file if present
+        twitch_config = self.config.get_twitch_config()
+
+        if twitch_config.get("enabled", False):
+            token = get_twitch_token()
+            channel = twitch_config.get("channel")
+
+            if token and channel:
+                self.chat_simulator.add_message("System", "Connecting to", (150, 150, 200))
+                self.chat_simulator.add_message("System", "Twitch...", (150, 150, 200))
+
+                self.twitch_manager = TwitchChatManager(channel, token)
+                if self.twitch_manager.start():
+                    self.chat_simulator.add_message("System", "TWITCH LIVE!", (100, 255, 100))
+                    self.chat_simulator.add_message("System", f"#{channel}", (100, 200, 255))
+                else:
+                    error = self.twitch_manager.get_error() or "Unknown error"
+                    self.chat_simulator.add_message("System", "Twitch failed:", (255, 100, 100))
+                    self.chat_simulator.add_message("System", error[:15], (255, 150, 150))
+                    self.twitch_manager = None
+            else:
+                if not token:
+                    self.chat_simulator.add_message("System", "No token in", (255, 200, 100))
+                    self.chat_simulator.add_message("System", ".env file", (255, 200, 100))
+                if not channel:
+                    self.chat_simulator.add_message("System", "No channel", (255, 200, 100))
+                    self.chat_simulator.add_message("System", "configured", (255, 200, 100))
+        else:
+            self.chat_simulator.add_message("System", "Click !extend or", (150, 150, 150))
+            self.chat_simulator.add_message("System", "!yank to vote!", (150, 150, 150))
 
     def _start_countdown(self) -> None:
         """Start the pre-round countdown."""
@@ -788,7 +822,10 @@ class GameplayScreen(BaseScreen):
 
     def on_exit(self) -> None:
         """Clean up when leaving gameplay."""
-        pass
+        # Stop Twitch connection if active
+        if self.twitch_manager:
+            self.twitch_manager.stop()
+            self.twitch_manager = None
 
     def handle_event(self, event: pygame.event.Event) -> None:
         """Handle input events."""
@@ -813,6 +850,16 @@ class GameplayScreen(BaseScreen):
             if event.button == 1:  # Left click
                 if self.chat_simulator and self.voting_system:
                     self.chat_simulator.handle_click(event.pos, self.voting_system)
+
+        elif event.type == TWITCH_VOTE_EVENT:
+            # Process Twitch vote
+            vote_type = event.vote_type
+            voter_id = event.voter_id
+            if self.voting_system and self.voting_system.add_vote(vote_type, voter_id):
+                # Show in chat simulator
+                color = (50, 200, 50) if vote_type == "extend" else (200, 50, 50)
+                if self.chat_simulator:
+                    self.chat_simulator.add_message(voter_id[:10], f"!{vote_type}", color)
 
     def _handle_key_down(self, key: int) -> None:
         """Handle key press - horizontal only."""

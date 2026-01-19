@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "channel": "code8899",
+  "bot_username": "SnackAttackBot",
+  "commands": {
+    "extend": "!extend",
+    "yank": "!yank"
+  }
+}
