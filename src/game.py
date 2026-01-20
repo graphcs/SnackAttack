@@ -16,9 +16,9 @@ from .screens.game_over import GameOverScreen
 from .audio.audio_manager import AudioManager
 
 
-# Display dimensions - wider for chat simulator panel
-DISPLAY_WIDTH = 1200
-DISPLAY_HEIGHT = 1000
+# Default display dimensions (can be overridden via config)
+DEFAULT_DISPLAY_WIDTH = 1200
+DEFAULT_DISPLAY_HEIGHT = 1000
 
 
 class Game:
@@ -41,8 +41,8 @@ class Game:
         self.event_bus = EventBus()
 
         # Set up display - direct rendering at full resolution
-        self.screen_width = DISPLAY_WIDTH
-        self.screen_height = DISPLAY_HEIGHT
+        self.screen_width = self.config.get("game_settings.window.width", DEFAULT_DISPLAY_WIDTH)
+        self.screen_height = self.config.get("game_settings.window.height", DEFAULT_DISPLAY_HEIGHT)
 
         self.fps = self.config.get("game_settings.window.fps", 60)
         title = self.config.get("game_settings.window.title", "Jazzy's Snack Attack")

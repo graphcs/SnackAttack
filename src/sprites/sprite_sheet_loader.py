@@ -24,7 +24,7 @@ class SpriteSheetLoader:
     # Target gameplay sprite size - large for good visibility
     GAMEPLAY_SIZE = (144, 144)
     PORTRAIT_SIZE = (160, 160)
-    FOOD_SIZE = (80, 80)  # Snack sprite size - larger for visibility
+    FOOD_SIZE = (72, 72)  # Snack sprite size - 0.9x of original 80x80
 
     # Animation timing (in seconds)
     RUN_FRAME_DURATION = 0.1      # 10 FPS for run cycle

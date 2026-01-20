@@ -1,6 +1,7 @@
 """Character selection screen."""
 
 import pygame
+import os
 from typing import Dict, Any, List, Optional
 from .base_screen import BaseScreen
 from ..core.state_machine import GameState
@@ -54,9 +55,24 @@ class CharacterSelectScreen(BaseScreen):
         self.text_color = (255, 255, 255)
         self.highlight_color = (255, 220, 80)
 
+        # Images
+        self.background_image: Optional[pygame.Surface] = None
+        self.title_image: Optional[pygame.Surface] = None
+        self.profile_images: Dict[str, Optional[pygame.Surface]] = {}
+
+        # Back button
+        self.back_font: Optional[pygame.font.Font] = None
+        self.back_button_rect: Optional[pygame.Rect] = None
+        self.back_color = (77, 43, 31)  # #4D2B1F
+        self.back_selected_color = (147, 76, 48)  # #934C30
+        self.back_selected = False
+        self.select_indicator: Optional[pygame.Surface] = None
+
     def on_enter(self, data: Dict[str, Any] = None) -> None:
         """Initialize character select screen."""
         self.initialize_fonts()
+        self._load_custom_font()
+        self._load_images()
 
         data = data or {}
         self.game_mode = data.get("mode", "1p")
@@ -64,7 +80,7 @@ class CharacterSelectScreen(BaseScreen):
 
         # Reset selection state
         self.p1_selection = 0
-        self.p2_selection = 1 if not self.vs_ai else None
+        self.p2_selection = None  # P2 not selected until P1 confirms
         self.active_player = 1
         self.p1_confirmed = False
         self.p2_confirmed = False
@@ -78,26 +94,32 @@ class CharacterSelectScreen(BaseScreen):
         self._update_card_selections()
 
     def _create_character_cards(self) -> None:
-        """Create character cards from config - 4 columns for 960x720."""
+        """Create character cards from config with 3x2 layout."""
         characters = self.config.get_all_characters()
 
-        # 4 column layout for 960x720 display
-        cards_per_row = 4
-        card_width = 180
-        card_height = 200
-        padding = 24
+        # Reorder characters: 1st row: jazzy, biggie, dash, 2nd row: lobo, prissy, rex
+        char_order = ["jazzy", "biggie", "dash", "lobo", "prissy", "rex"]
+        char_dict = {c.get("id"): c for c in characters}
+        ordered_characters = [char_dict[cid] for cid in char_order if cid in char_dict]
 
-        total_width = cards_per_row * card_width + (cards_per_row - 1) * padding
+        # 3 columns x 2 rows layout
+        cards_per_row = 3
+        card_width = int(self.screen_width * 0.25 * 1.1)
+        card_height = int(self.screen_height * 0.28 * 1.1)
+        padding_x = -25  # Cards closer together horizontally
+        padding_y = -70  # Rows closer together vertically
+
+        total_width = cards_per_row * card_width + (cards_per_row - 1) * padding_x
         start_x = (self.screen_width - total_width) // 2
-        start_y = 140
+        start_y = int(self.screen_height * 0.28)
 
         self.character_cards = []
-        for i, char_config in enumerate(characters):
+        for i, char_config in enumerate(ordered_characters):
             row = i // cards_per_row
             col = i % cards_per_row
 
-            x = start_x + col * (card_width + padding)
-            y = start_y + row * (card_height + padding)
+            x = start_x + col * (card_width + padding_x)
+            y = start_y + row * (card_height + padding_y)
 
             card = CharacterCard(char_config, x, y, card_width, card_height)
             self.character_cards.append(card)
@@ -112,6 +134,70 @@ class CharacterSelectScreen(BaseScreen):
         """Clean up when leaving screen."""
         pass
 
+    def _load_custom_font(self) -> None:
+        """Load custom Daydream font for back button and difficulty screen."""
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        ui_dir = os.path.join(base_dir, "ui")
+        font_path = os.path.join(ui_dir, "Daydream DEMO.otf")
+
+        if os.path.exists(font_path):
+            self.back_font = pygame.font.Font(font_path, 32)
+            # Override base fonts with Daydream for difficulty screen
+            self.title_font = pygame.font.Font(font_path, 36)
+            self.menu_font = pygame.font.Font(font_path, 28)
+            self.small_font = pygame.font.Font(font_path, 18)
+
+    def _load_images(self) -> None:
+        """Load background and title images."""
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        ui_dir = os.path.join(base_dir, "ui")
+
+        # Load background image
+        bg_path = os.path.join(ui_dir, "Choose your dog background.png")
+        if os.path.exists(bg_path):
+            self.background_image = pygame.image.load(bg_path).convert()
+            self.background_image = pygame.transform.scale(
+                self.background_image, (self.screen_width, self.screen_height)
+            )
+
+        # Load title image
+        title_path = os.path.join(ui_dir, "Choose your dog ui.png")
+        if os.path.exists(title_path):
+            self.title_image = pygame.image.load(title_path).convert_alpha()
+            # Scale title to fit nicely at top
+            title_max_width = int(self.screen_width * 0.6)
+            title_max_height = int(self.screen_height * 0.12)
+            title_rect = self.title_image.get_rect()
+            scale = min(title_max_width / title_rect.width, title_max_height / title_rect.height)
+            scale *= 1.5  # Make title 1.5x bigger
+            new_width = int(title_rect.width * scale)
+            new_height = int(title_rect.height * scale)
+            self.title_image = pygame.transform.scale(self.title_image, (new_width, new_height))
+
+        # Load profile images
+        profile_files = {
+            "jazzy": "Jazzy.png",
+            "biggie": "Biggie.png",
+            "prissy": "Prissy.png",
+            "lobo": "Lobo.png",
+            "rex": "Rex.png",
+            "dash": "Dash.png"
+        }
+        for char_id, filename in profile_files.items():
+            profile_path = os.path.join(ui_dir, filename)
+            if os.path.exists(profile_path):
+                self.profile_images[char_id] = pygame.image.load(profile_path).convert_alpha()
+
+        # Load select indicator image (same size as main menu)
+        select_path = os.path.join(ui_dir, "Select.png")
+        if os.path.exists(select_path):
+            self.select_indicator = pygame.image.load(select_path).convert_alpha()
+            # Scale to match main menu button size
+            select_scale = 0.576
+            new_width = int(self.select_indicator.get_width() * select_scale)
+            new_height = int(self.select_indicator.get_height() * select_scale)
+            self.select_indicator = pygame.transform.scale(self.select_indicator, (new_width, new_height))
+
     def handle_event(self, event: pygame.event.Event) -> None:
         """Handle input events."""
         if event.type == pygame.KEYDOWN:
@@ -120,9 +206,21 @@ class CharacterSelectScreen(BaseScreen):
             else:
                 self._handle_selection_input(event.key)
 
+        elif event.type == pygame.MOUSEMOTION:
+            # Handle hover on back button
+            if self.back_button_rect and self.back_button_rect.collidepoint(event.pos):
+                self.back_selected = True
+            else:
+                self.back_selected = False
+
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # Left click
+                if self.back_button_rect and self.back_button_rect.collidepoint(event.pos):
+                    self.state_machine.change_state(GameState.MAIN_MENU)
+
     def _handle_selection_input(self, key: int) -> None:
         """Handle character selection input."""
-        cards_per_row = 4  # Match _create_character_cards
+        cards_per_row = 3  # Match _create_character_cards
         num_cards = len(self.character_cards)
 
         # Get current selection based on active player
@@ -192,6 +290,8 @@ class CharacterSelectScreen(BaseScreen):
             else:
                 # Switch to P2 selection
                 self.active_player = 2
+                self.p2_selection = 0  # Initialize P2 selection
+                self._update_card_selections()
         else:
             self.p2_confirmed = True
             self._start_game()
@@ -204,6 +304,8 @@ class CharacterSelectScreen(BaseScreen):
         elif self.p1_confirmed and not self.vs_ai:
             self.p1_confirmed = False
             self.active_player = 1
+            self.p2_selection = None  # Reset P2 selection
+            self._update_card_selections()
         else:
             self.state_machine.change_state(GameState.MAIN_MENU)
 
@@ -235,27 +337,50 @@ class CharacterSelectScreen(BaseScreen):
         pass
 
     def render(self, surface: pygame.Surface) -> None:
-        """Render the character select screen to 960x720 display."""
-        surface.fill(self.bg_color)
+        """Render the character select screen with proportional positioning."""
+        # Background
+        if self.background_image:
+            surface.blit(self.background_image, (0, 0))
+        else:
+            surface.fill(self.bg_color)
 
-        # Title at top
-        self.draw_text(surface, "CHOOSE YOUR DOG!", self.title_font, self.highlight_color,
-                       (self.screen_width // 2, 60))
+        # Title image at top
+        if self.title_image:
+            title_rect = self.title_image.get_rect()
+            title_x = (self.screen_width - title_rect.width) // 2
+            title_y = int(self.screen_height * 0.08)
+            surface.blit(self.title_image, (title_x, title_y))
 
         # Player indicator
-        if not self.vs_ai:
+        if not self.vs_ai and self.back_font:
+            indicator_y = int(self.screen_height * 0.30)
             if self.active_player == 1:
                 choose_text = "P1 SELECT"
                 choose_color = self.p1_color
             else:
                 choose_text = "P2 SELECT"
                 choose_color = self.p2_color
-            self.draw_text(surface, choose_text, self.menu_font, choose_color,
-                           (self.screen_width // 2, 100))
+            self.draw_text(surface, choose_text, self.back_font, choose_color,
+                           (self.screen_width // 2, indicator_y))
 
         # Draw character cards
         for card in self.character_cards:
             self._render_card(surface, card)
+
+        # Back button (at same position as settings screen)
+        if self.back_font and not self.selecting_difficulty:
+            # Calculate position similar to settings screen
+            back_y = int(self.screen_height * 0.92) - 40
+            back_text_color = self.back_selected_color if self.back_selected else self.back_color
+            self.back_button_rect = self.draw_text(surface, "Back", self.back_font, back_text_color,
+                                                    (self.screen_width // 2, back_y))
+
+            # Draw select indicator when back is selected
+            if self.back_selected and self.select_indicator and self.back_button_rect:
+                select_rect = self.select_indicator.get_rect()
+                select_x = self.back_button_rect.left - select_rect.width - 6
+                select_y = self.back_button_rect.centery - select_rect.height // 2
+                surface.blit(self.select_indicator, (select_x, select_y))
 
         # Difficulty selection overlay
         if self.selecting_difficulty:
@@ -270,10 +395,7 @@ class CharacterSelectScreen(BaseScreen):
                            (self.screen_width // 2, self.screen_height - 30))
 
     def _render_card(self, surface: pygame.Surface, card: CharacterCard) -> None:
-        """Render a character card (180x200) for 960x720 display."""
-        from ..sprites.sprite_sheet_loader import SpriteSheetLoader
-        from ..sprites.pixel_art import SpriteCache
-
+        """Render a character card with profile image."""
         # Selection state determines border
         if card.selected_p1 and card.selected_p2:
             border_color = (200, 150, 255)  # Purple for both
@@ -288,68 +410,65 @@ class CharacterSelectScreen(BaseScreen):
             border_color = (60, 70, 100)
             border_width = 2
 
-        # Card background
-        bg_color = (30, 40, 70) if (card.selected_p1 or card.selected_p2) else (25, 35, 60)
-        pygame.draw.rect(surface, bg_color, card.rect, border_radius=8)
-        pygame.draw.rect(surface, border_color, card.rect, border_width, border_radius=8)
+        # Get profile image for this character
+        char_id = card.character_id.lower()
+        profile_img = self.profile_images.get(char_id)
 
-        # Try to get profile picture from sprite sheet loader first
-        loader = SpriteSheetLoader()
-        portrait = loader.get_portrait(card.character_id)
+        if profile_img:
+            # Scale profile image to fit card (80% of card size)
+            img_width = (card.rect.width - 10) * 0.8
+            img_height = (card.rect.height - 10) * 0.8
 
-        # Fallback to procedural portrait if profile picture not available
-        if portrait is None:
-            cache = SpriteCache()
-            portrait = cache.get_dog_portrait(card.character_id)
-            # Scale procedural portrait to 128x128
-            portrait = pygame.transform.scale(portrait, (128, 128))
+            # Maintain aspect ratio
+            orig_rect = profile_img.get_rect()
+            scale = min(img_width / orig_rect.width, img_height / orig_rect.height)
+            new_width = int(orig_rect.width * scale)
+            new_height = int(orig_rect.height * scale)
+            scaled_img = pygame.transform.scale(profile_img, (new_width, new_height))
 
-        # Center the portrait in the card
-        portrait_x = card.rect.centerx - 64
-        portrait_y = card.rect.y + 20
+            # Center the image in the card
+            img_x = card.rect.centerx - new_width // 2
+            img_y = card.rect.centery - new_height // 2
 
-        # Draw the portrait
-        surface.blit(portrait, (portrait_x, portrait_y))
+            surface.blit(scaled_img, (img_x, img_y))
 
-        # Draw name below portrait
-        name_y = card.rect.y + 160
-        name_color = self.highlight_color if (card.selected_p1 or card.selected_p2) else self.text_color
-        self.draw_text(surface, card.name.upper(), self.menu_font, name_color,
-                       (card.rect.centerx, name_y))
+            # Draw selection border on top of image
+            if card.selected_p1 or card.selected_p2:
+                border_rect = pygame.Rect(img_x - 2, img_y - 2, new_width + 4, new_height + 4)
+                # Use player color for selection box
+                if card.selected_p1 and card.selected_p2:
+                    selection_color = (200, 150, 255)  # Purple for both
+                elif card.selected_p1:
+                    selection_color = self.p1_color
+                else:
+                    selection_color = self.p2_color
+                pygame.draw.rect(surface, selection_color, border_rect, 4, border_radius=20)
+        else:
+            # Fallback: draw card background with name
+            bg_color = (30, 40, 70) if (card.selected_p1 or card.selected_p2) else (25, 35, 60)
+            pygame.draw.rect(surface, bg_color, card.rect, border_radius=8)
+            pygame.draw.rect(surface, border_color, card.rect, border_width, border_radius=8)
 
-        # Draw breed below name
-        breed_y = card.rect.y + 185
-        self.draw_text(surface, card.breed, self.small_font, (150, 150, 170),
-                       (card.rect.centerx, breed_y))
-
-        # Draw player indicator badges
-        if card.selected_p1:
-            badge_rect = pygame.Rect(card.rect.left + 8, card.rect.top + 8, 32, 24)
-            pygame.draw.rect(surface, self.p1_color, badge_rect, border_radius=4)
-            self.draw_text(surface, "P1", self.small_font, (255, 255, 255),
-                           (badge_rect.centerx, badge_rect.centery))
-
-        if card.selected_p2:
-            badge_rect = pygame.Rect(card.rect.right - 40, card.rect.top + 8, 32, 24)
-            pygame.draw.rect(surface, self.p2_color, badge_rect, border_radius=4)
-            self.draw_text(surface, "P2", self.small_font, (255, 255, 255),
-                           (badge_rect.centerx, badge_rect.centery))
+            name_color = self.highlight_color if (card.selected_p1 or card.selected_p2) else self.text_color
+            self.draw_text(surface, card.name.upper(), self.menu_font, name_color,
+                           (card.rect.centerx, card.rect.centery))
 
     def _render_difficulty_selection(self, surface: pygame.Surface) -> None:
-        """Render difficulty selection overlay for 960x720."""
+        """Render difficulty selection overlay with proportional positioning."""
         # Semi-transparent overlay
         overlay = pygame.Surface((self.screen_width, self.screen_height))
         overlay.fill((0, 0, 0))
         overlay.set_alpha(200)
         surface.blit(overlay, (0, 0))
 
-        # Title
+        # Title with proportional positioning
+        title_y = int(self.screen_height * 0.40)
         self.draw_text(surface, "SELECT DIFFICULTY", self.title_font,
-                       self.highlight_color, (self.screen_width // 2, 280))
+                       self.highlight_color, (self.screen_width // 2, title_y))
 
         # Difficulty options - horizontal layout
-        option_y = 380
-        option_spacing = 200
+        option_y = int(self.screen_height * 0.55)
+        option_spacing = int(self.screen_width * 0.20)
         start_x = self.screen_width // 2 - option_spacing
 
         for i, diff in enumerate(self.difficulties):
@@ -358,8 +477,10 @@ class CharacterSelectScreen(BaseScreen):
 
             # Draw box around selected
             if i == self.selected_difficulty:
-                box_rect = pygame.Rect(x - 80, option_y - 25, 160, 50)
-                pygame.draw.rect(surface, (60, 70, 40), box_rect, border_radius=8)
+                box_width = int(self.screen_width * 0.20)
+                box_height = 70
+                box_rect = pygame.Rect(x - box_width // 2, option_y - box_height // 2, box_width, box_height)
+                pygame.draw.rect(surface, (147, 76, 48), box_rect, border_radius=8)  # #934C30
                 pygame.draw.rect(surface, self.highlight_color, box_rect, 3, border_radius=8)
 
             self.draw_text(surface, diff.upper(), self.menu_font,

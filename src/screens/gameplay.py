@@ -97,12 +97,14 @@ class FallingSnack:
 class Arena:
     """A single player's game arena for 800x800 display with falling treats."""
 
-    def __init__(self, bounds: pygame.Rect, player: Player, level_config: Dict[str, Any]):
+    def __init__(self, bounds: pygame.Rect, player: Player, level_config: Dict[str, Any],
+                 background_image: Optional[pygame.Surface] = None):
         self.bounds = bounds
         self.player = player
         self.level_config = level_config
         self.snacks: List[FallingSnack] = []
         self.background_color = tuple(level_config.get("background_color", [200, 200, 200]))
+        self.background_image = background_image
 
         # Spawn settings for falling treats
         self.spawn_timer = 0.0
@@ -117,8 +119,8 @@ class Arena:
         # So player bottom (feet) is at bounds.bottom - 160 + 144 = bounds.bottom - 16
         self.ground_y = bounds.bottom - 16
 
-        # Create surface for this arena
-        self.surface = pygame.Surface((bounds.width, bounds.height))
+        # Create surface for this arena (with alpha for transparency)
+        self.surface = pygame.Surface((bounds.width, bounds.height), pygame.SRCALPHA)
 
     def spawn_snack(self, snack_configs: List[Dict[str, Any]]) -> Optional[FallingSnack]:
         """Spawn a new falling snack at the top of the arena."""
@@ -167,16 +169,25 @@ class Arena:
         self.snacks = [s for s in self.snacks if s.update(dt)]
 
     def render(self) -> pygame.Surface:
-        """Render the arena with wooden floor and fence border."""
-        from ..sprites.pixel_art import draw_wooden_floor, draw_fence_border
+        """Render the arena with background image or wooden floor."""
+        # Clear the surface
+        self.surface.fill((0, 0, 0, 0))
 
-        # Draw wooden plank floor
-        floor_rect = pygame.Rect(0, 0, self.bounds.width, self.bounds.height)
-        draw_wooden_floor(self.surface, floor_rect)
-
-        # Draw blue wooden fence border
-        border_rect = pygame.Rect(0, 0, self.bounds.width, self.bounds.height)
-        draw_fence_border(self.surface, border_rect, thickness=12)
+        if self.background_image:
+            # Use the background image - scale to width, smaller height
+            scaled_height = int(self.bounds.height * 0.65)
+            scaled_bg = pygame.transform.scale(self.background_image,
+                (self.bounds.width, scaled_height))
+            # Position at bottom of arena
+            bg_y = self.bounds.height - scaled_height
+            self.surface.blit(scaled_bg, (0, bg_y))
+        else:
+            # Fallback to wooden floor
+            from ..sprites.pixel_art import draw_wooden_floor, draw_fence_border
+            floor_rect = pygame.Rect(0, 0, self.bounds.width, self.bounds.height)
+            draw_wooden_floor(self.surface, floor_rect)
+            border_rect = pygame.Rect(0, 0, self.bounds.width, self.bounds.height)
+            draw_fence_border(self.surface, border_rect, thickness=12)
 
         # Draw the leash
         self._draw_leash()
@@ -573,7 +584,7 @@ class GameplayScreen(BaseScreen):
 
         self.current_level = 1
         self.current_round = 1
-        self.max_rounds = 3
+        self.max_rounds = 1
 
         self.round_timer = 0.0
         self.round_duration = 60.0
@@ -613,6 +624,19 @@ class GameplayScreen(BaseScreen):
         # Game area width (1000px, rest is chat panel)
         self.game_area_width = GAME_AREA_WIDTH
 
+        # Background image
+        self.background_image: Optional[pygame.Surface] = None
+        self.logo_image: Optional[pygame.Surface] = None
+        self.battlefield_image: Optional[pygame.Surface] = None
+        self.menu_bar_image: Optional[pygame.Surface] = None
+
+        # Custom font for score/timer
+        self.daydream_font: Optional[pygame.font.Font] = None
+        self.daydream_font_small: Optional[pygame.font.Font] = None
+        self.daydream_font_smaller: Optional[pygame.font.Font] = None
+        self.daydream_font_smallest: Optional[pygame.font.Font] = None
+        self.daydream_font_countdown: Optional[pygame.font.Font] = None
+
         # Announcement system for dramatic effect reveals
         self.announcement_text = ""
         self.announcement_color = (255, 255, 255)
@@ -627,6 +651,8 @@ class GameplayScreen(BaseScreen):
     def on_enter(self, data: Dict[str, Any] = None) -> None:
         """Initialize gameplay."""
         self.initialize_fonts()
+        self._load_custom_font()
+        self._load_background()
 
         data = data or {}
         self.game_mode = data.get("mode", "1p")
@@ -653,6 +679,54 @@ class GameplayScreen(BaseScreen):
 
         # Start countdown
         self._start_countdown()
+
+    def _load_custom_font(self) -> None:
+        """Load custom Daydream font for score and timer."""
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        ui_dir = os.path.join(base_dir, "ui")
+        font_path = os.path.join(ui_dir, "Daydream DEMO.otf")
+
+        if os.path.exists(font_path):
+            self.daydream_font = pygame.font.Font(font_path, 28)
+            self.daydream_font_small = pygame.font.Font(font_path, 20)  # For player name
+            self.daydream_font_smaller = pygame.font.Font(font_path, 16)  # For "score"
+            self.daydream_font_smallest = pygame.font.Font(font_path, 14)  # For score number
+            self.daydream_font_countdown = pygame.font.Font(font_path, 120)  # For countdown
+
+    def _load_background(self) -> None:
+        """Load the battle screen background image and logo."""
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        ui_dir = os.path.join(base_dir, "ui")
+
+        bg_path = os.path.join(ui_dir, "battle screen background.png")
+        if os.path.exists(bg_path):
+            self.background_image = pygame.image.load(bg_path).convert()
+            self.background_image = pygame.transform.scale(
+                self.background_image, (self.screen_width, self.screen_height)
+            )
+
+        # Load logo image
+        logo_path = os.path.join(ui_dir, "jazzy logo sml.png")
+        if os.path.exists(logo_path):
+            self.logo_image = pygame.image.load(logo_path).convert_alpha()
+            # Scale to 80% of original size
+            new_width = int(self.logo_image.get_width() * 0.8)
+            new_height = int(self.logo_image.get_height() * 0.8)
+            self.logo_image = pygame.transform.scale(self.logo_image, (new_width, new_height))
+
+        # Load battlefield image
+        battlefield_path = os.path.join(ui_dir, "battle field.png")
+        if os.path.exists(battlefield_path):
+            self.battlefield_image = pygame.image.load(battlefield_path).convert_alpha()
+
+        # Load menu bar image
+        menu_bar_path = os.path.join(ui_dir, "Menu bar.png")
+        if os.path.exists(menu_bar_path):
+            self.menu_bar_image = pygame.image.load(menu_bar_path).convert_alpha()
+            # Scale to 65.3% of original size (0.6875 * 0.95)
+            new_width = int(self.menu_bar_image.get_width() * 0.653)
+            new_height = int(self.menu_bar_image.get_height() * 0.653)
+            self.menu_bar_image = pygame.transform.scale(self.menu_bar_image, (new_width, new_height))
 
     def _setup_arenas(self, p1_char: Dict, p2_char: Dict) -> None:
         """Set up the game arenas and players."""
@@ -686,9 +760,9 @@ class GameplayScreen(BaseScreen):
         else:
             self.player2 = Player(p2_char, arena2_bounds, player_num=2, horizontal_only=True)
 
-        # Create arenas
-        self.arena1 = Arena(arena1_bounds, self.player1, level_config)
-        self.arena2 = Arena(arena2_bounds, self.player2, level_config)
+        # Create arenas with battlefield image
+        self.arena1 = Arena(arena1_bounds, self.player1, level_config, self.battlefield_image)
+        self.arena2 = Arena(arena2_bounds, self.player2, level_config, self.battlefield_image)
 
         # Position players at ground level (offset for larger sprites)
         ground_offset = 160
@@ -807,9 +881,9 @@ class GameplayScreen(BaseScreen):
         """End the game and go to results screen."""
         winner = None
         if self.p1_round_wins > self.p2_round_wins:
-            winner = "Player 1"
+            winner = self.player1.name
         elif self.p2_round_wins > self.p1_round_wins:
-            winner = "Player 2" if not self.vs_ai else "AI"
+            winner = self.player2.name
 
         self.state_machine.change_state(GameState.GAME_OVER, {
             "winner": winner,
@@ -817,7 +891,9 @@ class GameplayScreen(BaseScreen):
             "p2_score": self.player2.score,
             "p1_rounds": self.p1_round_wins,
             "p2_rounds": self.p2_round_wins,
-            "vs_ai": self.vs_ai
+            "vs_ai": self.vs_ai,
+            "p1_name": self.player1.name,
+            "p2_name": self.player2.name
         })
 
     def on_exit(self) -> None:
@@ -1070,7 +1146,17 @@ class GameplayScreen(BaseScreen):
 
     def render(self, surface: pygame.Surface) -> None:
         """Render the gameplay screen to 800x800 display."""
-        surface.fill(self.bg_color)
+        if self.background_image:
+            surface.blit(self.background_image, (0, 0))
+        else:
+            surface.fill(self.bg_color)
+
+        # Draw logo at top center of game area
+        if self.logo_image:
+            logo_rect = self.logo_image.get_rect()
+            logo_x = (self.game_area_width - logo_rect.width) // 2
+            logo_y = 5
+            surface.blit(self.logo_image, (logo_x, logo_y))
 
         # Apply screen shake offset
         shake_x = 0
@@ -1079,7 +1165,16 @@ class GameplayScreen(BaseScreen):
             shake_x = random.randint(-int(self.shake_intensity), int(self.shake_intensity))
             shake_y = random.randint(-int(self.shake_intensity), int(self.shake_intensity))
 
-        # Draw header
+        # Draw menu bar above battlefield
+        if self.menu_bar_image and self.arena1:
+            menu_bar_rect = self.menu_bar_image.get_rect()
+            # Position close to battlefield (battlefield starts at 35% from top of arena)
+            battlefield_top_y = self.arena1.bounds.y + int(self.arena1.bounds.height * 0.35)
+            menu_bar_x = (self.game_area_width - menu_bar_rect.width) // 2
+            menu_bar_y = battlefield_top_y - menu_bar_rect.height + 20
+            surface.blit(self.menu_bar_image, (menu_bar_x, menu_bar_y))
+
+        # Draw header (scores and round info) on top of menu bar
         self._render_header(surface)
 
         # Draw arenas
@@ -1132,32 +1227,104 @@ class GameplayScreen(BaseScreen):
             self._render_pause(surface)
 
     def _render_header(self, surface: pygame.Surface) -> None:
-        """Render the game header."""
-        # Header bar (only over game area)
-        header_height = 55
-        pygame.draw.rect(surface, (40, 80, 40), (0, 0, self.game_area_width, header_height))
-        pygame.draw.rect(surface, (60, 120, 60), (0, 0, self.game_area_width, header_height), 2)
+        """Render the game header (score and round info on menu bar)."""
+        # Calculate position on menu bar
+        if self.arena1 and self.menu_bar_image:
+            battlefield_top_y = self.arena1.bounds.y + int(self.arena1.bounds.height * 0.35)
+            menu_bar_y = battlefield_top_y - self.menu_bar_image.get_height() + 20
+            # Position text centered vertically on menu bar
+            info_y = menu_bar_y + self.menu_bar_image.get_height() // 2
+        elif self.arena1:
+            info_y = self.arena1.bounds.y + int(self.arena1.bounds.height * 0.35) - 30
+        else:
+            info_y = 280
 
-        # Title centered in game area
-        self.draw_text(surface, "JAZZY'S SNACK ATTACK", self.title_font,
-                       (255, 220, 80), (self.game_area_width // 2, 28))
+        # Colors
+        score_color = (147, 76, 48)  # #934C30 for player scores
+        vs_color = (77, 43, 31)  # #4D2B1F for round wins
+        timer_color = (232, 136, 55)  # #E88837 for timer and round
+        font = self.daydream_font if self.daydream_font else self.menu_font
 
-        # Timer on right side of game area
+        # Calculate position above menu bar for timer and round
+        if self.arena1 and self.menu_bar_image:
+            battlefield_top_y = self.arena1.bounds.y + int(self.arena1.bounds.height * 0.35)
+            menu_bar_y = battlefield_top_y - self.menu_bar_image.get_height() + 20
+            above_menu_y = menu_bar_y - 25
+        else:
+            above_menu_y = info_y - 40
+
+        # Smaller font for timer and round
+        small_font = self.daydream_font_small if self.daydream_font_small else font
+
+        # Timer on right side (above menu bar)
         if self.round_active:
             timer_text = f"{int(self.round_timer)}s"
-            timer_color = (255, 100, 100) if self.round_timer < 10 else (255, 255, 200)
-            self.draw_text(surface, timer_text, self.menu_font, timer_color,
-                           (self.game_area_width - 50, 28))
+            self.draw_text(surface, timer_text, small_font, timer_color,
+                           (self.game_area_width - 100, above_menu_y))
 
-        # Round info on left
-        round_text = f"R{self.current_round}"
-        self.draw_text(surface, round_text, self.menu_font,
-                       (200, 200, 150), (40, 20))
+        # Round number on left side (above menu bar)
+        round_text = f"round {self.current_round}"
+        self.draw_text(surface, round_text, small_font, timer_color,
+                       (130, above_menu_y))
 
-        # Wins indicator
-        wins_text = f"{self.p1_round_wins}-{self.p2_round_wins}"
-        self.draw_text(surface, wins_text, self.small_font,
-                       (255, 255, 200), (40, 42))
+        # Round wins display centered "# vs #" with smaller "vs"
+        vs_font = self.daydream_font_smallest if self.daydream_font_smallest else font
+        # Render each part separately
+        p1_wins_surface = font.render(str(self.p1_round_wins), True, vs_color)
+        vs_surface = vs_font.render("vs", True, vs_color)
+        p2_wins_surface = font.render(str(self.p2_round_wins), True, vs_color)
+
+        total_width = p1_wins_surface.get_width() + 8 + vs_surface.get_width() + 8 + p2_wins_surface.get_width()
+        start_x = (self.game_area_width - total_width) // 2
+
+        surface.blit(p1_wins_surface, (start_x, info_y - p1_wins_surface.get_height() // 2))
+        start_x += p1_wins_surface.get_width() + 8
+        surface.blit(vs_surface, (start_x, info_y - vs_surface.get_height() // 2))
+        start_x += vs_surface.get_width() + 8
+        surface.blit(p2_wins_surface, (start_x, info_y - p2_wins_surface.get_height() // 2))
+
+        # Get fonts for different sizes
+        name_font = self.daydream_font_small if self.daydream_font_small else font  # 20px
+        score_label_font = self.daydream_font_smallest if self.daydream_font_smallest else font  # 14px (smallest)
+        score_num_font = self.daydream_font_smaller if self.daydream_font_smaller else font  # 16px
+
+        # Player 1 score on left: "player name" "score" "#"
+        if self.player1:
+            x_pos = 80
+            # Render player name
+            name_surface = name_font.render(self.player1.name, True, score_color)
+            name_height = name_surface.get_height()
+            surface.blit(name_surface, (x_pos, info_y - name_height // 2))
+            x_pos += name_surface.get_width() + 5
+
+            # Render "score"
+            score_label_surface = score_label_font.render("score", True, score_color)
+            surface.blit(score_label_surface, (x_pos, info_y - score_label_surface.get_height() // 2))
+            x_pos += score_label_surface.get_width() + 5
+
+            # Render score number
+            score_num_surface = score_num_font.render(str(self.player1.score), True, score_color)
+            surface.blit(score_num_surface, (x_pos, info_y - score_num_surface.get_height() // 2))
+
+        # Player 2 score on right: "player name" "score" "#"
+        if self.player2:
+            # Calculate total width first for right alignment
+            name_surface = name_font.render(self.player2.name, True, score_color)
+            score_label_surface = score_label_font.render("score", True, score_color)
+            score_num_surface = score_num_font.render(str(self.player2.score), True, score_color)
+            total_width = name_surface.get_width() + 5 + score_label_surface.get_width() + 5 + score_num_surface.get_width()
+
+            x_pos = self.game_area_width - 80 - total_width
+            # Render player name
+            surface.blit(name_surface, (x_pos, info_y - name_surface.get_height() // 2))
+            x_pos += name_surface.get_width() + 5
+
+            # Render "score"
+            surface.blit(score_label_surface, (x_pos, info_y - score_label_surface.get_height() // 2))
+            x_pos += score_label_surface.get_width() + 5
+
+            # Render score number
+            surface.blit(score_num_surface, (x_pos, info_y - score_num_surface.get_height() // 2))
 
     def _render_player_hud(self, surface: pygame.Surface, player: Player,
                            arena_bounds: pygame.Rect, label: str) -> None:
@@ -1178,9 +1345,11 @@ class GameplayScreen(BaseScreen):
         self.draw_text(surface, f"{label}: {player.name}", self.small_font, (255, 255, 255),
                        (arena_bounds.x + 10, hud_y + 22), center=False)
 
-        # Score on right
+        # Score on right with Daydream font and orange color
         score_text = f"{player.score}"
-        self.draw_text(surface, score_text, self.menu_font, (255, 220, 100),
+        score_font = self.daydream_font if self.daydream_font else self.menu_font
+        orange_color = (232, 136, 55)  # #E88837
+        self.draw_text(surface, score_text, score_font, orange_color,
                        (arena_bounds.right - 60, hud_y + 22), center=False)
 
     def _render_crossed_players(self, surface: pygame.Surface, shake_x: int, shake_y: int) -> None:
@@ -1227,9 +1396,10 @@ class GameplayScreen(BaseScreen):
         else:
             text = "GO!"
 
-        # Draw large countdown text (centered in game area)
-        large_font = pygame.font.Font(None, 180)
-        text_surface = large_font.render(text, True, (255, 200, 0))
+        # Draw large countdown text (centered in game area) with Daydream font and #FBCD64 color
+        countdown_font = self.daydream_font_countdown if self.daydream_font_countdown else pygame.font.Font(None, 180)
+        countdown_color = (251, 205, 100)  # #FBCD64
+        text_surface = countdown_font.render(text, True, countdown_color)
         text_rect = text_surface.get_rect(center=(self.game_area_width // 2, self.screen_height // 2))
         surface.blit(text_surface, text_rect)
 
