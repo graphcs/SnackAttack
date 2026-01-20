@@ -25,11 +25,11 @@
       "hitbox": [48, 52]
     },
     {
-      "id": "lobo",
-      "name": "Lobo",
+      "id": "snowy",
+      "name": "Snowy",
       "breed": "Husky",
       "base_speed": 1.0,
-      "color": [140, 150, 165],
+      "color": [255, 255, 255],
       "hitbox": [52, 56]
     },
     {

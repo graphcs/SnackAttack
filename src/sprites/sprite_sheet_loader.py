@@ -36,7 +36,7 @@ class SpriteSheetLoader:
         'biggie': 'Biggie',
         'prissy': 'Prissy',
         'dash': 'Dash',
-        'lobo': 'Lobo',
+        'snowy': 'Snowy',
         'rex': 'Rex',
         'jazzy': 'Jazzy'
     }
@@ -48,7 +48,8 @@ class SpriteSheetLoader:
         'broccoli': 'Broccoli',
         'spicy_pepper': 'Chilli',
         'bacon': 'Bacon',
-        'steak': 'Steak'
+        'steak': 'Steak',
+        'red_bull': 'Red Bull'
     }
 
     def __new__(cls) -> 'SpriteSheetLoader':
@@ -86,7 +87,7 @@ class SpriteSheetLoader:
 
     def _get_profile_path(self) -> str:
         """Get the path to profile images folder."""
-        # Profile folder is at: snack_attack/Profile/
+        # Profile images are in: snack_attack/Profile/
         # This file is at: snack_attack/src/sprites/
         current_dir = os.path.dirname(os.path.abspath(__file__))
         return os.path.join(current_dir, '..', '..', 'Profile')
@@ -233,7 +234,14 @@ class SpriteSheetLoader:
         try:
             if os.path.exists(filepath):
                 sprite = pygame.image.load(filepath).convert_alpha()
-                sprite = pygame.transform.smoothscale(sprite, self.FOOD_SIZE)
+                # Use custom sizes for certain foods
+                if snack_id == 'red_bull':
+                    size = (int(self.FOOD_SIZE[0] * 0.9), int(self.FOOD_SIZE[1] * 0.9))  # 0.95 * 0.95
+                elif snack_id == 'pizza':
+                    size = (int(self.FOOD_SIZE[0] * 0.95), int(self.FOOD_SIZE[1] * 0.95))
+                else:
+                    size = self.FOOD_SIZE
+                sprite = pygame.transform.smoothscale(sprite, size)
                 self._food_cache[snack_id] = sprite
                 return sprite
         except pygame.error as e:

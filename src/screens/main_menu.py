@@ -5,6 +5,7 @@ import os
 from typing import Dict, Any, List, Optional
 from .base_screen import BaseScreen
 from ..core.state_machine import GameState
+from ..core.event_bus import GameEvent
 
 
 class MenuItem:
@@ -49,6 +50,7 @@ class MainMenuScreen(BaseScreen):
         """Initialize menu when entering screen."""
         self.initialize_fonts()
         self._load_images()
+        self._start_background_music()
 
         # Create menu items with proportional positioning
         center_x = self.screen_width // 2
@@ -141,6 +143,18 @@ class MainMenuScreen(BaseScreen):
             new_height = int(self.select_indicator.get_height() * button_scale)
             self.select_indicator = pygame.transform.scale(self.select_indicator, (new_width, new_height))
 
+    def _start_background_music(self) -> None:
+        """Start playing background music."""
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        music_path = os.path.join(base_dir, "Sound effect", "background.mp3")
+        if os.path.exists(music_path):
+            try:
+                pygame.mixer.music.load(music_path)
+                pygame.mixer.music.set_volume(0.5)
+                pygame.mixer.music.play(-1)  # Loop indefinitely
+            except pygame.error as e:
+                print(f"Could not play background music: {e}")
+
     def handle_event(self, event: pygame.event.Event) -> None:
         """Handle input events."""
         if event.type == pygame.KEYDOWN:
@@ -166,6 +180,8 @@ class MainMenuScreen(BaseScreen):
         self.menu_items[self.selected_index].selected = False
         self.selected_index = (self.selected_index + direction) % len(self.menu_items)
         self.menu_items[self.selected_index].selected = True
+        # Play select sound
+        self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
 
     def _handle_mouse_hover(self, pos: tuple) -> None:
         """Handle mouse hover over menu items."""
@@ -175,6 +191,8 @@ class MainMenuScreen(BaseScreen):
                     self.menu_items[self.selected_index].selected = False
                     self.selected_index = i
                     item.selected = True
+                    # Play select sound
+                    self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
                 break
 
     def _handle_mouse_click(self, pos: tuple) -> None:

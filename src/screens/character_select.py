@@ -5,6 +5,7 @@ import os
 from typing import Dict, Any, List, Optional
 from .base_screen import BaseScreen
 from ..core.state_machine import GameState
+from ..core.event_bus import GameEvent
 
 
 class CharacterCard:
@@ -97,8 +98,8 @@ class CharacterSelectScreen(BaseScreen):
         """Create character cards from config with 3x2 layout."""
         characters = self.config.get_all_characters()
 
-        # Reorder characters: 1st row: jazzy, biggie, dash, 2nd row: lobo, prissy, rex
-        char_order = ["jazzy", "biggie", "dash", "lobo", "prissy", "rex"]
+        # Reorder characters: 1st row: jazzy, biggie, dash, 2nd row: snowy, prissy, rex
+        char_order = ["jazzy", "biggie", "dash", "snowy", "prissy", "rex"]
         char_dict = {c.get("id"): c for c in characters}
         ordered_characters = [char_dict[cid] for cid in char_order if cid in char_dict]
 
@@ -138,7 +139,7 @@ class CharacterSelectScreen(BaseScreen):
         """Load custom Daydream font for back button and difficulty screen."""
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         ui_dir = os.path.join(base_dir, "ui")
-        font_path = os.path.join(ui_dir, "Daydream DEMO.otf")
+        font_path = os.path.join(ui_dir, "Daydream.ttf")
 
         if os.path.exists(font_path):
             self.back_font = pygame.font.Font(font_path, 32)
@@ -174,17 +175,18 @@ class CharacterSelectScreen(BaseScreen):
             new_height = int(title_rect.height * scale)
             self.title_image = pygame.transform.scale(self.title_image, (new_width, new_height))
 
-        # Load profile images
+        # Load profile images from Profile folder
+        profile_dir = os.path.join(base_dir, "Profile")
         profile_files = {
             "jazzy": "Jazzy.png",
             "biggie": "Biggie.png",
             "prissy": "Prissy.png",
-            "lobo": "Lobo.png",
+            "snowy": "Snowy.png",
             "rex": "Rex.png",
             "dash": "Dash.png"
         }
         for char_id, filename in profile_files.items():
-            profile_path = os.path.join(ui_dir, filename)
+            profile_path = os.path.join(profile_dir, filename)
             if os.path.exists(profile_path):
                 self.profile_images[char_id] = pygame.image.load(profile_path).convert_alpha()
 
@@ -213,10 +215,38 @@ class CharacterSelectScreen(BaseScreen):
             else:
                 self.back_selected = False
 
+            # Handle hover on character cards (only when not selecting difficulty)
+            if not self.selecting_difficulty:
+                for i, card in enumerate(self.character_cards):
+                    if card.rect.collidepoint(event.pos):
+                        # Update selection based on active player
+                        old_selection = self.p1_selection if self.active_player == 1 else self.p2_selection
+                        if self.active_player == 1:
+                            self.p1_selection = i
+                        else:
+                            self.p2_selection = i
+                        if old_selection != i:
+                            self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
+                        self._update_card_selections()
+                        break
+
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # Left click
                 if self.back_button_rect and self.back_button_rect.collidepoint(event.pos):
                     self.state_machine.change_state(GameState.MAIN_MENU)
+
+                # Handle click on character cards (only when not selecting difficulty)
+                if not self.selecting_difficulty:
+                    for i, card in enumerate(self.character_cards):
+                        if card.rect.collidepoint(event.pos):
+                            # Update selection and confirm
+                            if self.active_player == 1:
+                                self.p1_selection = i
+                            else:
+                                self.p2_selection = i
+                            self._update_card_selections()
+                            self._confirm_selection()
+                            break
 
     def _handle_selection_input(self, key: int) -> None:
         """Handle character selection input."""
@@ -262,19 +292,28 @@ class CharacterSelectScreen(BaseScreen):
 
         # Update selection
         if self.active_player == 1:
-            self.p1_selection = new_selection
+            if self.p1_selection != new_selection:
+                self.p1_selection = new_selection
+                self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
         else:
-            self.p2_selection = new_selection
+            if self.p2_selection != new_selection:
+                self.p2_selection = new_selection
+                self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
 
         self._update_card_selections()
 
     def _handle_difficulty_input(self, key: int) -> None:
         """Handle difficulty selection input."""
+        old_difficulty = self.selected_difficulty
         if key == pygame.K_LEFT:
             self.selected_difficulty = max(0, self.selected_difficulty - 1)
         elif key == pygame.K_RIGHT:
             self.selected_difficulty = min(2, self.selected_difficulty + 1)
-        elif key == pygame.K_RETURN:
+
+        if self.selected_difficulty != old_difficulty:
+            self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
+
+        if key == pygame.K_RETURN:
             self._start_game()
         elif key == pygame.K_ESCAPE:
             self.selecting_difficulty = False
@@ -311,6 +350,9 @@ class CharacterSelectScreen(BaseScreen):
 
     def _start_game(self) -> None:
         """Start the game with selected characters."""
+        # Play start sound
+        self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "start"})
+
         p1_char = self.character_cards[self.p1_selection].config
 
         if self.vs_ai:
@@ -355,10 +397,10 @@ class CharacterSelectScreen(BaseScreen):
         if not self.vs_ai and self.back_font:
             indicator_y = int(self.screen_height * 0.30)
             if self.active_player == 1:
-                choose_text = "P1 SELECT"
+                choose_text = "Player 1 Select"
                 choose_color = self.p1_color
             else:
-                choose_text = "P2 SELECT"
+                choose_text = "Player 2 Select"
                 choose_color = self.p2_color
             self.draw_text(surface, choose_text, self.back_font, choose_color,
                            (self.screen_width // 2, indicator_y))

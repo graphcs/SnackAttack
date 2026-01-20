@@ -70,6 +70,12 @@ class Player:
         # Animation controller (lazy initialization)
         self._animation_controller: Optional['AnimationController'] = None
 
+        # Steam particles for chaos/chilli effect
+        self.steam_particles: List[Dict[str, float]] = []
+
+        # Speed lines for boost effect
+        self.speed_lines: List[Dict[str, float]] = []
+
     @property
     def rect(self) -> pygame.Rect:
         """Get the player's collision rectangle."""
@@ -96,9 +102,21 @@ class Player:
         """Calculate current speed multiplier from active effects."""
         multiplier = 1.0
         for effect in self.active_effects:
-            if effect["type"] in ("speed_boost", "slow"):
+            if effect["type"] in ("speed_boost", "slow", "boost"):
                 multiplier *= effect["magnitude"]
         return multiplier
+
+    def get_score_multiplier(self) -> float:
+        """Calculate current score multiplier from active effects (boost mode)."""
+        multiplier = 1.0
+        for effect in self.active_effects:
+            if effect["type"] == "boost":
+                multiplier *= effect["magnitude"]
+        return multiplier
+
+    def has_boost_effect(self) -> bool:
+        """Check if player has boost effect active."""
+        return any(e["type"] == "boost" for e in self.active_effects)
 
     def apply_effect(self, effect_type: str, magnitude: float, duration: float) -> None:
         """Apply a power-up or penalty effect."""
@@ -208,6 +226,9 @@ class Player:
         # Update effects
         self.update_effects(dt)
 
+        # Update steam particles
+        self._update_steam_particles(dt)
+
     def extend_leash(self, cross_arena_max_x: int = None) -> None:
         """Extend the leash, allowing more movement range.
 
@@ -268,10 +289,82 @@ class Player:
         self.is_invincible = False
         self.controls_flipped = False
         self.reset_leash()
+        self.steam_particles.clear()
+        self.speed_lines.clear()
 
         # Reset animation state
         if self._animation_controller is not None:
             self._animation_controller.reset()
+
+    def _update_steam_particles(self, dt: float) -> None:
+        """Update steam particles for chaos/chilli effect."""
+        import random
+
+        # Check if chaos effect is active
+        has_chaos_effect = any(e["type"] == "chaos" for e in self.active_effects)
+
+        # Spawn new steam particles if chaos effect active
+        if has_chaos_effect:
+            # Spawn 2-3 particles per frame
+            for _ in range(random.randint(2, 3)):
+                self.steam_particles.append({
+                    "x": self.x + self.width // 2 + random.uniform(-20, 20),
+                    "y": self.y + 10,
+                    "vx": random.uniform(-15, 15),
+                    "vy": random.uniform(-60, -40),
+                    "life": 0.8,
+                    "size": random.uniform(6, 12)
+                })
+
+        # Update existing particles
+        for p in self.steam_particles:
+            p["x"] += p["vx"] * dt
+            p["y"] += p["vy"] * dt
+            p["life"] -= dt
+            p["size"] += 8 * dt  # Grow as they rise
+
+        # Remove dead particles
+        self.steam_particles = [p for p in self.steam_particles if p["life"] > 0]
+
+        # Update speed lines for boost effect
+        self._update_speed_lines(dt)
+
+    def _update_speed_lines(self, dt: float) -> None:
+        """Update speed lines for boost effect."""
+        import random
+
+        # Check if boost effect is active
+        has_boost = self.has_boost_effect()
+
+        # Spawn new speed lines if boost active
+        if has_boost:
+            # Spawn 1-2 lines per frame
+            for _ in range(random.randint(1, 2)):
+                # Lines spawn behind the dog based on facing direction
+                if self.facing_right:
+                    start_x = self.x - 10
+                else:
+                    start_x = self.x + self.width + 10
+
+                self.speed_lines.append({
+                    "x": start_x,
+                    "y": self.y + random.uniform(20, self.height - 20),
+                    "length": random.uniform(30, 60),
+                    "life": 0.3,
+                    "facing_right": self.facing_right
+                })
+
+        # Update existing speed lines
+        for line in self.speed_lines:
+            line["life"] -= dt
+            # Lines move opposite to facing direction
+            if line["facing_right"]:
+                line["x"] -= 400 * dt
+            else:
+                line["x"] += 400 * dt
+
+        # Remove dead lines
+        self.speed_lines = [l for l in self.speed_lines if l["life"] > 0]
 
     def render(self, surface: pygame.Surface, offset: Tuple[int, int] = (0, 0)) -> None:
         """
@@ -301,19 +394,49 @@ class Player:
                 flash_sprite.fill((255, 255, 255, 100), special_flags=pygame.BLEND_RGBA_ADD)
                 sprite = flash_sprite
 
+        # Handle slow effect (broccoli) - turn green
+        has_slow_effect = any(e["type"] == "slow" for e in self.active_effects)
+        if has_slow_effect:
+            green_sprite = sprite.copy()
+            green_sprite.fill((0, 150, 0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+            sprite = green_sprite
+
+        # Handle chaos effect (chilli) - turn red
+        has_chaos_effect = any(e["type"] == "chaos" for e in self.active_effects)
+        if has_chaos_effect:
+            red_sprite = sprite.copy()
+            red_sprite.fill((150, 0, 0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+            sprite = red_sprite
+
+        # Handle boost effect (red bull) - add blue tint
+        if self.has_boost_effect():
+            blue_sprite = sprite.copy()
+            blue_sprite.fill((0, 50, 150, 0), special_flags=pygame.BLEND_RGBA_ADD)
+            sprite = blue_sprite
+
+        # Draw speed lines BEHIND the sprite (for boost effect)
+        for line in self.speed_lines:
+            line_x = int(line["x"] - self.arena_bounds.left + offset[0])
+            line_y = int(line["y"] - self.arena_bounds.top + offset[1])
+            alpha = int(255 * (line["life"] / 0.3))
+            length = int(line["length"])
+
+            # Draw speed line (cyan/light blue)
+            line_surface = pygame.Surface((length, 4), pygame.SRCALPHA)
+            pygame.draw.line(line_surface, (100, 200, 255, alpha), (0, 2), (length, 2), 3)
+            surface.blit(line_surface, (line_x, line_y - 2))
+
         # Draw the sprite
         surface.blit(sprite, (render_x, render_y))
 
-        # Draw effect indicators above the sprite
-        indicator_y = render_y - 10
-        indicator_x = render_x + 32
+        # Draw steam particles (for chaos/chilli effect)
+        for p in self.steam_particles:
+            particle_x = int(p["x"] - self.arena_bounds.left + offset[0])
+            particle_y = int(p["y"] - self.arena_bounds.top + offset[1])
+            alpha = int(255 * (p["life"] / 0.8))
+            size = int(p["size"])
 
-        for effect in self.active_effects:
-            if effect["type"] == "speed_boost":
-                pygame.draw.circle(surface, (255, 255, 0), (indicator_x, indicator_y), 6)
-            elif effect["type"] == "slow":
-                pygame.draw.circle(surface, (100, 200, 100), (indicator_x, indicator_y), 6)
-            elif effect["type"] == "chaos":
-                pygame.draw.circle(surface, (255, 100, 100), (indicator_x, indicator_y), 6)
-            elif effect["type"] == "invincibility":
-                pygame.draw.circle(surface, (255, 255, 100), (indicator_x, indicator_y), 6)
+            # Draw steam puff (white/gray circle with transparency)
+            steam_surface = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+            pygame.draw.circle(steam_surface, (255, 255, 255, alpha), (size, size), size)
+            surface.blit(steam_surface, (particle_x - size, particle_y - size))

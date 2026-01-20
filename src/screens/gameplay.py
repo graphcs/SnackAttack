@@ -41,6 +41,12 @@ class FallingSnack:
         self.active = True
         self.collected = False
 
+        # Rotation for natural falling effect
+        import random
+        self.rotation_angle = random.uniform(0, 360)  # Random start angle
+        # Slow rotation, random direction (positive = counter-clockwise, negative = clockwise)
+        self.rotation_speed = random.uniform(30, 60) * random.choice([-1, 1])
+
     @property
     def rect(self) -> pygame.Rect:
         """Get the snack's collision rectangle."""
@@ -52,6 +58,7 @@ class FallingSnack:
             return False
 
         self.y += self.fall_speed * dt
+        self.rotation_angle += self.rotation_speed * dt
 
         # Remove if fallen past ground level (where player stands)
         if self.y > self.ground_y:
@@ -91,7 +98,11 @@ class FallingSnack:
             cache = SpriteCache()
             sprite = cache.get_snack_sprite(self.snack_id)
 
-        surface.blit(sprite, (render_x, render_y))
+        # Rotate the sprite
+        rotated_sprite = pygame.transform.rotate(sprite, self.rotation_angle)
+        # Center the rotated sprite at the original position
+        rotated_rect = rotated_sprite.get_rect(center=(render_x + self.width // 2, render_y + self.height // 2))
+        surface.blit(rotated_sprite, rotated_rect)
 
 
 class Arena:
@@ -584,7 +595,7 @@ class GameplayScreen(BaseScreen):
 
         self.current_level = 1
         self.current_round = 1
-        self.max_rounds = 1
+        self.max_rounds = 3
 
         self.round_timer = 0.0
         self.round_duration = 60.0
@@ -648,6 +659,11 @@ class GameplayScreen(BaseScreen):
         self.flash_alpha = 0
         self.flash_timer = 0.0
 
+        # Point popup system
+        self.point_popups = []  # List of {x, y, points, timer, stolen}
+        self.popup_duration = 1.0  # seconds
+        self.daydream_font_popup: Optional[pygame.font.Font] = None
+
     def on_enter(self, data: Dict[str, Any] = None) -> None:
         """Initialize gameplay."""
         self.initialize_fonts()
@@ -677,6 +693,9 @@ class GameplayScreen(BaseScreen):
         # Initialize voting system and UI
         self._setup_voting_ui()
 
+        # Restart background music
+        self._restart_background_music()
+
         # Start countdown
         self._start_countdown()
 
@@ -684,7 +703,7 @@ class GameplayScreen(BaseScreen):
         """Load custom Daydream font for score and timer."""
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         ui_dir = os.path.join(base_dir, "ui")
-        font_path = os.path.join(ui_dir, "Daydream DEMO.otf")
+        font_path = os.path.join(ui_dir, "Daydream.ttf")
 
         if os.path.exists(font_path):
             self.daydream_font = pygame.font.Font(font_path, 28)
@@ -692,6 +711,7 @@ class GameplayScreen(BaseScreen):
             self.daydream_font_smaller = pygame.font.Font(font_path, 16)  # For "score"
             self.daydream_font_smallest = pygame.font.Font(font_path, 14)  # For score number
             self.daydream_font_countdown = pygame.font.Font(font_path, 120)  # For countdown
+            self.daydream_font_popup = pygame.font.Font(font_path, 24)  # For point popups
 
     def _load_background(self) -> None:
         """Load the battle screen background image and logo."""
@@ -820,11 +840,25 @@ class GameplayScreen(BaseScreen):
             self.chat_simulator.add_message("System", "Click !extend or", (150, 150, 150))
             self.chat_simulator.add_message("System", "!yank to vote!", (150, 150, 150))
 
+    def _restart_background_music(self) -> None:
+        """Start gameplay music from the beginning."""
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        music_path = os.path.join(base_dir, "Sound effect", "Gameplay.mp3")
+        if os.path.exists(music_path):
+            try:
+                pygame.mixer.music.load(music_path)
+                pygame.mixer.music.set_volume(0.3)
+                pygame.mixer.music.play(-1)  # Loop indefinitely
+            except pygame.error as e:
+                print(f"Could not play gameplay music: {e}")
+
     def _start_countdown(self) -> None:
         """Start the pre-round countdown."""
         self.countdown = 3
         self.countdown_timer = 1.0
         self.round_active = False
+        # Play countdown sound for "3" (uses 2&3 sound)
+        self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "countdown_2_3"})
 
     def _start_round(self) -> None:
         """Start the actual round."""
@@ -992,6 +1026,12 @@ class GameplayScreen(BaseScreen):
                 self.countdown_timer = 1.0
                 if self.countdown == 0:
                     self._start_round()
+                elif self.countdown == 2:
+                    # Play countdown sound for "2" (uses 2&3 sound)
+                    self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "countdown_2_3"})
+                elif self.countdown == 1:
+                    # Play countdown sound for "1"
+                    self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "countdown_1"})
             return
 
         if not self.round_active:
@@ -1018,6 +1058,12 @@ class GameplayScreen(BaseScreen):
             self.flash_timer -= dt
             if self.flash_timer <= 0:
                 self.flash_alpha = 0
+
+        # Update point popups
+        for popup in self.point_popups:
+            popup["timer"] -= dt
+            popup["y"] -= 50 * dt  # Float upward
+        self.point_popups = [p for p in self.point_popups if p["timer"] > 0]
 
         # Update voting system
         if self.voting_system:
@@ -1048,18 +1094,24 @@ class GameplayScreen(BaseScreen):
 
     def _check_collisions(self) -> None:
         """Check for player-snack collisions."""
+        # Use smaller hitboxes for tighter collision (shrink by 40px on each side)
+        p1_hitbox = self.player1.rect.inflate(-80, -80)
+        p2_hitbox = self.player2.rect.inflate(-80, -80)
+
         # Player 1 collisions with their own arena
         for snack in self.arena1.snacks[:]:
             if not snack.active:
                 continue
-            if self.player1.rect.colliderect(snack.rect):
+            snack_hitbox = snack.rect.inflate(-20, -20)
+            if p1_hitbox.colliderect(snack_hitbox):
                 self._collect_snack(self.player1, snack)
 
         # Player 2 collisions with their own arena
         for snack in self.arena2.snacks[:]:
             if not snack.active:
                 continue
-            if self.player2.rect.colliderect(snack.rect):
+            snack_hitbox = snack.rect.inflate(-20, -20)
+            if p2_hitbox.colliderect(snack_hitbox):
                 self._collect_snack(self.player2, snack)
 
         # Cross-arena collisions when unleashed!
@@ -1068,7 +1120,8 @@ class GameplayScreen(BaseScreen):
             for snack in self.arena2.snacks[:]:
                 if not snack.active:
                     continue
-                if self.player1.rect.colliderect(snack.rect):
+                snack_hitbox = snack.rect.inflate(-20, -20)
+                if p1_hitbox.colliderect(snack_hitbox):
                     self._collect_snack(self.player1, snack, stolen=True)
 
         # Player 2 can steal from arena 1 if they've crossed over
@@ -1076,12 +1129,16 @@ class GameplayScreen(BaseScreen):
             for snack in self.arena1.snacks[:]:
                 if not snack.active:
                     continue
-                if self.player2.rect.colliderect(snack.rect):
+                snack_hitbox = snack.rect.inflate(-20, -20)
+                if p2_hitbox.colliderect(snack_hitbox):
                     self._collect_snack(self.player2, snack, stolen=True)
 
     def _collect_snack(self, player: Player, snack: FallingSnack, stolen: bool = False) -> None:
         """Handle snack collection."""
         result = snack.collect()
+
+        # Emit snack collected event for sound effects
+        self.event_bus.emit(GameEvent.SNACK_COLLECTED, {"snack_id": result["snack_id"]})
 
         # Trigger eat animation
         player.trigger_eat_animation()
@@ -1093,7 +1150,20 @@ class GameplayScreen(BaseScreen):
             if self.chat_simulator:
                 self.chat_simulator.add_message("System", "STOLEN! +50%", (255, 200, 50))
 
+        # Apply boost score multiplier (2x during Red Bull boost)
+        score_multiplier = player.get_score_multiplier()
+        points = int(points * score_multiplier)
+
         player.add_score(points)
+
+        # Add point popup at snack position
+        self.point_popups.append({
+            "x": snack.x + snack.width // 2,
+            "y": snack.y,
+            "points": points,
+            "timer": self.popup_duration,
+            "stolen": stolen
+        })
 
         # Apply effect if any
         effect = result.get("effect")
@@ -1189,6 +1259,9 @@ class GameplayScreen(BaseScreen):
 
             # Render players who have crossed into the other arena (on top of everything)
             self._render_crossed_players(surface, shake_x, shake_y)
+
+        # Draw point popups
+        self._render_point_popups(surface, shake_x, shake_y)
 
         # Draw player HUDs below arenas
         if self.player1 and self.player2:
@@ -1295,7 +1368,7 @@ class GameplayScreen(BaseScreen):
             name_surface = name_font.render(self.player1.name, True, score_color)
             name_height = name_surface.get_height()
             surface.blit(name_surface, (x_pos, info_y - name_height // 2))
-            x_pos += name_surface.get_width() + 5
+            x_pos += name_surface.get_width() + 15  # More space after name
 
             # Render "score"
             score_label_surface = score_label_font.render("score", True, score_color)
@@ -1312,12 +1385,12 @@ class GameplayScreen(BaseScreen):
             name_surface = name_font.render(self.player2.name, True, score_color)
             score_label_surface = score_label_font.render("score", True, score_color)
             score_num_surface = score_num_font.render(str(self.player2.score), True, score_color)
-            total_width = name_surface.get_width() + 5 + score_label_surface.get_width() + 5 + score_num_surface.get_width()
+            total_width = name_surface.get_width() + 15 + score_label_surface.get_width() + 5 + score_num_surface.get_width()
 
             x_pos = self.game_area_width - 80 - total_width
             # Render player name
             surface.blit(name_surface, (x_pos, info_y - name_surface.get_height() // 2))
-            x_pos += name_surface.get_width() + 5
+            x_pos += name_surface.get_width() + 15  # More space after name
 
             # Render "score"
             surface.blit(score_label_surface, (x_pos, info_y - score_label_surface.get_height() // 2))
@@ -1381,6 +1454,38 @@ class GameplayScreen(BaseScreen):
                 glow_rect = pygame.Rect(render_x - 3, render_y - 3,
                                        self.player2.width + 6, self.player2.height + 6)
                 pygame.draw.rect(surface, (50, 255, 50), glow_rect, 3, border_radius=8)
+
+    def _render_point_popups(self, surface: pygame.Surface, shake_x: int, shake_y: int) -> None:
+        """Render floating point popups when treats are collected."""
+        popup_font = self.daydream_font_popup if self.daydream_font_popup else pygame.font.Font(None, 24)
+        popup_color = (81, 180, 71)  # #51B447
+        outline_color = (255, 255, 255)  # White outline
+
+        for popup in self.point_popups:
+            points = popup['points']
+            text = f"+{points}" if points >= 0 else f"{points}"
+            x = int(popup["x"]) + shake_x
+            y = int(popup["y"]) + shake_y
+
+            # Use red for negative points, green for positive
+            color = popup_color if points >= 0 else (222, 97, 91)  # #DE615B for negative
+
+            # Calculate alpha based on remaining time (fade out)
+            alpha = min(255, int(255 * (popup["timer"] / self.popup_duration)))
+
+            # Render text with white outline (draw outline first, then main text)
+            # Draw outline by rendering text offset in 4 directions
+            for dx, dy in [(-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, -1), (-1, 1), (1, 1)]:
+                outline_surface = popup_font.render(text, True, outline_color)
+                outline_surface.set_alpha(alpha)
+                outline_rect = outline_surface.get_rect(center=(x + dx, y + dy))
+                surface.blit(outline_surface, outline_rect)
+
+            # Draw main text
+            text_surface = popup_font.render(text, True, color)
+            text_surface.set_alpha(alpha)
+            text_rect = text_surface.get_rect(center=(x, y))
+            surface.blit(text_surface, text_rect)
 
     def _render_countdown(self, surface: pygame.Surface) -> None:
         """Render the countdown overlay."""

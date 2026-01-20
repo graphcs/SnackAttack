@@ -6,7 +6,7 @@
       "background_color": [255, 228, 181],
       "round_duration_seconds": 60,
       "spawn_rate_multiplier": 1.0,
-      "snack_pool": ["pizza", "bone", "broccoli"],
+      "snack_pool": ["pizza", "bone", "broccoli", "spicy_pepper"],
       "obstacles": []
     },
     {
@@ -15,7 +15,7 @@
       "background_color": [144, 238, 144],
       "round_duration_seconds": 75,
       "spawn_rate_multiplier": 1.2,
-      "snack_pool": ["pizza", "bone", "broccoli", "bacon", "spicy_pepper"],
+      "snack_pool": ["pizza", "bone", "broccoli", "bacon", "spicy_pepper", "red_bull"],
       "obstacles": [
         {"type": "fence", "x": 100, "y": 200, "width": 150, "height": 10}
       ]
@@ -26,7 +26,7 @@
       "background_color": [135, 206, 250],
       "round_duration_seconds": 90,
       "spawn_rate_multiplier": 1.5,
-      "snack_pool": ["pizza", "bone", "broccoli", "bacon", "spicy_pepper", "steak"],
+      "snack_pool": ["pizza", "bone", "broccoli", "bacon", "spicy_pepper", "steak", "red_bull"],
       "obstacles": [
         {"type": "bench", "x": 150, "y": 150, "width": 60, "height": 20},
         {"type": "tree", "x": 50, "y": 300, "width": 30, "height": 30}

@@ -5,6 +5,7 @@ import os
 from typing import Dict, Any, List, Optional
 from .base_screen import BaseScreen
 from ..core.state_machine import GameState
+from ..core.event_bus import GameEvent
 
 
 class SettingItem:
@@ -63,7 +64,7 @@ class SettingsScreen(BaseScreen):
         """Load custom Daydream font."""
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         ui_dir = os.path.join(base_dir, "ui")
-        font_path = os.path.join(ui_dir, "Daydream DEMO.otf")
+        font_path = os.path.join(ui_dir, "Daydream.ttf")
 
         if os.path.exists(font_path):
             self.menu_font = pygame.font.Font(font_path, 28)
@@ -246,6 +247,9 @@ class SettingsScreen(BaseScreen):
             self.selected_index = new_index
             self.settings_items[self.selected_index].selected = True
 
+        # Play select sound
+        self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
+
     def _adjust_value(self, direction: int) -> None:
         """Adjust the current setting value."""
         if not self.settings_items:
@@ -332,7 +336,7 @@ class SettingsScreen(BaseScreen):
             color = self.text_color
 
         # Item name with proportional positioning
-        name_x = int(self.screen_width * 0.20)
+        name_x = int(self.screen_width * 0.22)  # Moved slightly right
         text_rect = self.draw_text(surface, item.name, self.menu_font, color,
                        (name_x, item.y_position), center=False)
         # Create a wider hover area that covers the whole row

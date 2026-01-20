@@ -5,6 +5,7 @@ import os
 from typing import Dict, Any, Optional
 from .base_screen import BaseScreen
 from ..core.state_machine import GameState
+from ..core.event_bus import GameEvent
 
 
 class GameOverScreen(BaseScreen):
@@ -23,6 +24,7 @@ class GameOverScreen(BaseScreen):
         self.p2_name = "Player 2"
 
         self.selected_option = 0  # 0 = Play Again, 1 = Main Menu
+        self.menu_option_rects = []  # Store rects for hover detection
 
         # Background image
         self.background_image: Optional[pygame.Surface] = None
@@ -51,6 +53,7 @@ class GameOverScreen(BaseScreen):
         self.initialize_fonts()
         self._load_custom_font()
         self._load_background()
+        self._start_background_music()
 
         data = data or {}
         self.winner = data.get("winner")
@@ -68,7 +71,7 @@ class GameOverScreen(BaseScreen):
         """Load custom Daydream font."""
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         ui_dir = os.path.join(base_dir, "ui")
-        font_path = os.path.join(ui_dir, "Daydream DEMO.otf")
+        font_path = os.path.join(ui_dir, "Daydream.ttf")
 
         if os.path.exists(font_path):
             self.daydream_font = pygame.font.Font(font_path, 28)
@@ -127,6 +130,18 @@ class GameOverScreen(BaseScreen):
             icon_width = int(self.select_icon.get_width() * (icon_height / self.select_icon.get_height()))
             self.select_icon = pygame.transform.scale(self.select_icon, (icon_width, icon_height))
 
+    def _start_background_music(self) -> None:
+        """Start playing background music."""
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        music_path = os.path.join(base_dir, "Sound effect", "background.mp3")
+        if os.path.exists(music_path):
+            try:
+                pygame.mixer.music.load(music_path)
+                pygame.mixer.music.set_volume(0.5)
+                pygame.mixer.music.play(-1)  # Loop indefinitely
+            except pygame.error as e:
+                print(f"Could not play background music: {e}")
+
     def on_exit(self) -> None:
         """Clean up when leaving screen."""
         pass
@@ -136,10 +151,30 @@ class GameOverScreen(BaseScreen):
         if event.type == pygame.KEYDOWN:
             if event.key in (pygame.K_UP, pygame.K_DOWN):
                 self.selected_option = 1 - self.selected_option  # Toggle between 0 and 1
+                # Play select sound
+                self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
             elif event.key == pygame.K_RETURN:
                 self._select_option()
             elif event.key == pygame.K_ESCAPE:
                 self.state_machine.change_state(GameState.MAIN_MENU)
+
+        elif event.type == pygame.MOUSEMOTION:
+            # Handle hover on menu options
+            for i, rect in enumerate(self.menu_option_rects):
+                if rect and rect.collidepoint(event.pos):
+                    if self.selected_option != i:
+                        self.selected_option = i
+                        # Play select sound
+                        self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
+                    break
+
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # Left click
+                for i, rect in enumerate(self.menu_option_rects):
+                    if rect and rect.collidepoint(event.pos):
+                        self.selected_option = i
+                        self._select_option()
+                        break
 
     def _select_option(self) -> None:
         """Handle option selection."""
@@ -283,16 +318,27 @@ class GameOverScreen(BaseScreen):
         options_y = int(self.screen_height * 0.85)
         option_spacing = int(self.screen_height * 0.06)
         options = ["Play Again", "Main Menu"]
-        menu_color = (77, 43, 31)  # #4D2B1F
+        menu_color_normal = (77, 43, 31)  # #4D2B1F
+        menu_color_hover = (147, 76, 48)  # #934C30
         menu_font = self.daydream_font if self.daydream_font else self.menu_font
+
+        # Clear and rebuild menu option rects
+        self.menu_option_rects = []
 
         for i, option in enumerate(options):
             option_y = options_y + i * option_spacing
+
+            # Use hover color if selected
+            menu_color = menu_color_hover if i == self.selected_option else menu_color_normal
 
             # Render text
             text_surface = menu_font.render(option, True, menu_color)
             text_rect = text_surface.get_rect(center=(self.screen_width // 2, option_y))
             surface.blit(text_surface, text_rect)
+
+            # Store rect for hover detection (with some padding)
+            hover_rect = text_rect.inflate(20, 10)
+            self.menu_option_rects.append(hover_rect)
 
             # Draw select icon next to selected option
             if i == self.selected_option and self.select_icon:

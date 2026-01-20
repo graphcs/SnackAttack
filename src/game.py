@@ -53,6 +53,7 @@ class Game:
 
         # Initialize audio
         self.audio_manager = AudioManager(self.config, self.event_bus)
+        self._load_sounds()
 
         # Initialize state machine
         self.state_machine = StateMachine()
@@ -63,6 +64,23 @@ class Game:
         # Game state
         self.running = True
         self.clock = pygame.time.Clock()
+
+    def _load_sounds(self) -> None:
+        """Load all game sound effects."""
+        import os
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        sound_dir = os.path.join(base_dir, "Sound effect")
+
+        # Load sound effects
+        self.audio_manager.load_sound("dog_eat", os.path.join(sound_dir, "Dog eat.mp3"))
+        self.audio_manager.load_sound("point_earned", os.path.join(sound_dir, "Point earned.mp3"))
+        self.audio_manager.load_sound("broccoli", os.path.join(sound_dir, "Broccoli.mp3"))
+        self.audio_manager.load_sound("red_bull", os.path.join(sound_dir, "Red bull.mp3"))
+        self.audio_manager.load_sound("chilli", os.path.join(sound_dir, "chilli.mp3"))
+        self.audio_manager.load_sound("countdown_2_3", os.path.join(sound_dir, "2&3.mp3"))
+        self.audio_manager.load_sound("countdown_1", os.path.join(sound_dir, "1.mp3"))
+        self.audio_manager.load_sound("select", os.path.join(sound_dir, "select.mp3"))
+        self.audio_manager.load_sound("start", os.path.join(sound_dir, "start.mp3"))
 
     def _create_screens(self) -> None:
         """Create and register all game screens."""
