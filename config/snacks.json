@@ -75,6 +75,20 @@
       "despawn_seconds": 4.0,
       "color": [150, 90, 55],
       "size": [48, 48]
+    },
+    {
+      "id": "red_bull",
+      "name": "Red Bull",
+      "point_value": 50,
+      "effect": {
+        "type": "boost",
+        "magnitude": 2.0,
+        "duration_seconds": 6.0
+      },
+      "spawn_weight": 6,
+      "despawn_seconds": 6.0,
+      "color": [0, 90, 170],
+      "size": [48, 48]
     }
   ],
   "spawn_settings": {

@@ -1,14 +1,14 @@
 {
   "window": {
-    "width": 800,
-    "height": 600,
+    "width": 1000,
+    "height": 1000,
     "title": "Jazzy's Snack Attack",
     "fps": 60,
     "fullscreen": false
   },
   "gameplay": {
     "round_duration_seconds": 90,
-    "rounds_per_game": 3,
+    "rounds_per_game": 1,
     "arena_width": 350,
     "arena_height": 450,
     "split_screen_gap": 20

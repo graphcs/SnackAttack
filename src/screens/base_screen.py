@@ -10,10 +10,15 @@ if TYPE_CHECKING:
     from ..core.event_bus import EventBus
 
 
-# Display dimensions - wider for chat simulator panel
-SCREEN_WIDTH = 1200
-SCREEN_HEIGHT = 1000
-GAME_AREA_WIDTH = 1000  # Main game area width (two arenas side by side)
+# Default display dimensions (can be overridden via config)
+DEFAULT_SCREEN_WIDTH = 1200
+DEFAULT_SCREEN_HEIGHT = 1000
+DEFAULT_GAME_AREA_WIDTH = 1000  # Main game area width (two arenas side by side)
+
+# Aliases for backward compatibility
+SCREEN_WIDTH = DEFAULT_SCREEN_WIDTH
+SCREEN_HEIGHT = DEFAULT_SCREEN_HEIGHT
+GAME_AREA_WIDTH = DEFAULT_GAME_AREA_WIDTH
 
 
 class BaseScreen(ABC):
@@ -33,9 +38,9 @@ class BaseScreen(ABC):
         self.config = config
         self.event_bus = event_bus
 
-        # Screen dimensions - full resolution for detailed pixel art
-        self.screen_width = SCREEN_WIDTH
-        self.screen_height = SCREEN_HEIGHT
+        # Screen dimensions - read from config or use defaults
+        self.screen_width = self.config.get("game_settings.window.width", DEFAULT_SCREEN_WIDTH)
+        self.screen_height = self.config.get("game_settings.window.height", DEFAULT_SCREEN_HEIGHT)
 
         # Common fonts
         self.title_font: Optional[pygame.font.Font] = None

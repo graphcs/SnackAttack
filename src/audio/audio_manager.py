@@ -79,14 +79,17 @@ class AudioManager:
     def _on_snack_collected(self, event: EventData) -> None:
         """Play sound when snack is collected."""
         snack_id = event.payload.get("snack_id", "")
+        # Play dog eat sound for all snacks
+        self.play_sound("dog_eat")
+        # Play specific sounds for special snacks
         if snack_id == "broccoli":
-            self.play_sound("yuck")
-        elif snack_id in ("bone", "steak"):
-            self.play_sound("powerup")
-        elif snack_id == "spicy_pepper":
-            self.play_sound("spicy")
+            self.play_sound("broccoli")
+        elif snack_id == "red_bull":
+            self.play_sound("red_bull")
+        elif snack_id == "chilli":
+            self.play_sound("chilli")
         else:
-            self.play_sound("chomp")
+            self.play_sound("point_earned")
 
     def _on_powerup(self, event: EventData) -> None:
         """Play sound when powerup activates."""
