@@ -664,6 +664,23 @@ class GameplayScreen(BaseScreen):
         self.popup_duration = 1.0  # seconds
         self.daydream_font_popup: Optional[pygame.font.Font] = None
 
+        # Walk-in animation state
+        self.walk_in_active = False
+        self.walk_in_duration = 3.5  # seconds for walk-in animation (slower)
+        self.walk_in_timer = 0.0
+        self.walk_in_frames: List[pygame.Surface] = []
+        self.walk_in_frame_index = 0
+        self.walk_in_frame_timer = 0.0
+        self.walk_in_frame_duration = 0.15  # Slower frame rate for walking
+        self.walk_in_p1_x = 0.0  # Player 1 walk-in x position
+        self.walk_in_p2_x = 0.0  # Player 2 walk-in x position
+        self.walk_in_p1_start_x = 0.0
+        self.walk_in_p1_end_x = 0.0
+        self.walk_in_p2_start_x = 0.0
+        self.walk_in_p2_end_x = 0.0
+        self.walk_in_p1_is_jazzy = False  # Track if player 1 is Jazzy
+        self.walk_in_p2_is_jazzy = False  # Track if player 2 is Jazzy
+
     def on_enter(self, data: Dict[str, Any] = None) -> None:
         """Initialize gameplay."""
         self.initialize_fonts()
@@ -784,8 +801,8 @@ class GameplayScreen(BaseScreen):
         self.arena1 = Arena(arena1_bounds, self.player1, level_config, self.battlefield_image)
         self.arena2 = Arena(arena2_bounds, self.player2, level_config, self.battlefield_image)
 
-        # Position players at ground level (offset for larger sprites)
-        ground_offset = 160
+        # Position players at ground level (offset for larger sprites - 216px now)
+        ground_offset = 230
         self.player1.y = arena1_bounds.bottom - ground_offset
         self.player2.y = arena2_bounds.bottom - ground_offset
 
@@ -857,8 +874,113 @@ class GameplayScreen(BaseScreen):
         self.countdown = 3
         self.countdown_timer = 1.0
         self.round_active = False
+        self.walk_in_active = False
+
+        # Check if players are Jazzy (for walk-in animation)
+        p1_is_jazzy = self.player1 and self.player1.character_id == 'jazzy'
+        p2_is_jazzy = self.player2 and self.player2.character_id == 'jazzy'
+
+        # Position Jazzy off-screen during countdown (they'll walk in after)
+        # Non-Jazzy players stay at their normal center positions
+        if self.player1:
+            if p1_is_jazzy:
+                self.player1.x = -1000
+            else:
+                self.player1.x = self.arena1.bounds.centerx - self.player1.width // 2
+        if self.player2:
+            if p2_is_jazzy:
+                self.player2.x = -1000
+            else:
+                self.player2.x = self.arena2.bounds.centerx - self.player2.width // 2
+
         # Play countdown sound for "3" (uses 2&3 sound)
         self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "countdown_2_3"})
+
+    def _start_walk_in(self) -> None:
+        """Start the walk-in animation after countdown (only for Jazzy)."""
+        from ..sprites.sprite_sheet_loader import SpriteSheetLoader
+
+        self.walk_in_active = True
+        self.walk_in_timer = self.walk_in_duration
+        self.walk_in_frame_index = 0
+        self.walk_in_frame_timer = 0.0
+
+        # Check if either player is Jazzy
+        self.walk_in_p1_is_jazzy = self.player1 and self.player1.character_id == 'jazzy'
+        self.walk_in_p2_is_jazzy = self.player2 and self.player2.character_id == 'jazzy'
+
+        # Only load walking frames if at least one player is Jazzy
+        loader = SpriteSheetLoader()
+        if self.walk_in_p1_is_jazzy or self.walk_in_p2_is_jazzy:
+            # Use 0.95x of previous size (127x119 * 0.95 = 121x113)
+            self.walk_in_frames = loader.get_walking_frames('jazzy', facing_right=True, target_size=(121, 113))
+        else:
+            self.walk_in_frames = []
+
+        # Set up walk-in positions for player 1 (walks from left to center)
+        if self.arena1:
+            self.walk_in_p1_start_x = self.arena1.bounds.left - self.player1.width
+            self.walk_in_p1_end_x = self.arena1.bounds.centerx - self.player1.width // 2
+            self.walk_in_p1_x = self.walk_in_p1_start_x
+
+        # Set up walk-in positions for player 2 (walks from left to center of their arena)
+        if self.arena2:
+            self.walk_in_p2_start_x = self.arena2.bounds.left - self.player2.width
+            self.walk_in_p2_end_x = self.arena2.bounds.centerx - self.player2.width // 2
+            self.walk_in_p2_x = self.walk_in_p2_start_x
+
+        # Position players at the ground level but off-screen to the left
+        ground_offset = 230
+        if self.arena1:
+            self.player1.y = self.arena1.bounds.bottom - ground_offset
+        if self.arena2:
+            self.player2.y = self.arena2.bounds.bottom - ground_offset
+
+    def _update_walk_in(self, dt: float) -> None:
+        """Update the walk-in animation."""
+        self.walk_in_timer -= dt
+
+        # Update animation frame
+        self.walk_in_frame_timer += dt
+        if self.walk_in_frame_timer >= self.walk_in_frame_duration:
+            self.walk_in_frame_timer -= self.walk_in_frame_duration
+            if self.walk_in_frames:
+                self.walk_in_frame_index = (self.walk_in_frame_index + 1) % len(self.walk_in_frames)
+
+        # Calculate progress (0 to 1)
+        progress = 1.0 - (self.walk_in_timer / self.walk_in_duration)
+        progress = min(1.0, max(0.0, progress))
+
+        # Use easing for smoother animation (ease-out)
+        eased_progress = 1.0 - (1.0 - progress) ** 2
+
+        # Update walk-in positions (for rendering)
+        self.walk_in_p1_x = self.walk_in_p1_start_x + (self.walk_in_p1_end_x - self.walk_in_p1_start_x) * eased_progress
+        self.walk_in_p2_x = self.walk_in_p2_start_x + (self.walk_in_p2_end_x - self.walk_in_p2_start_x) * eased_progress
+
+        # Only hide Jazzy players (they're rendered via walk-in animation)
+        # Non-Jazzy players should be at their normal positions
+        if self.player1:
+            if self.walk_in_p1_is_jazzy:
+                self.player1.x = -1000  # Hide Jazzy, we render walk-in sprite instead
+            else:
+                self.player1.x = self.walk_in_p1_end_x  # Show non-Jazzy at final position
+
+        if self.player2:
+            if self.walk_in_p2_is_jazzy:
+                self.player2.x = -1000  # Hide Jazzy, we render walk-in sprite instead
+            else:
+                self.player2.x = self.walk_in_p2_end_x  # Show non-Jazzy at final position
+
+        # Check if walk-in is complete
+        if self.walk_in_timer <= 0:
+            self.walk_in_active = False
+            # Position all players at their final positions
+            if self.player1:
+                self.player1.x = self.walk_in_p1_end_x
+            if self.player2:
+                self.player2.x = self.walk_in_p2_end_x
+            self._start_round()
 
     def _start_round(self) -> None:
         """Start the actual round."""
@@ -870,7 +992,7 @@ class GameplayScreen(BaseScreen):
         self.arena2.snacks.clear()
 
         # Reset player positions to ground
-        ground_offset = 160
+        ground_offset = 230
         self.player1.y = self.arena1.bounds.bottom - ground_offset
         self.player2.y = self.arena2.bounds.bottom - ground_offset
 
@@ -1025,13 +1147,19 @@ class GameplayScreen(BaseScreen):
                 self.countdown -= 1
                 self.countdown_timer = 1.0
                 if self.countdown == 0:
-                    self._start_round()
+                    # Start walk-in animation instead of immediately starting round
+                    self._start_walk_in()
                 elif self.countdown == 2:
                     # Play countdown sound for "2" (uses 2&3 sound)
                     self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "countdown_2_3"})
                 elif self.countdown == 1:
                     # Play countdown sound for "1"
                     self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "countdown_1"})
+            return
+
+        # Update walk-in animation
+        if self.walk_in_active:
+            self._update_walk_in(dt)
             return
 
         if not self.round_active:
@@ -1295,6 +1423,10 @@ class GameplayScreen(BaseScreen):
         if self.countdown > 0:
             self._render_countdown(surface)
 
+        # Draw walk-in animation
+        if self.walk_in_active:
+            self._render_walk_in(surface)
+
         # Draw pause overlay
         if self.paused:
             self._render_pause(surface)
@@ -1517,12 +1649,17 @@ class GameplayScreen(BaseScreen):
         surface.blit(overlay, (0, 0))
 
         center_x = self.game_area_width // 2
-        self.draw_text(surface, "PAUSED", self.title_font, (255, 200, 0),
+
+        # Use Daydream font for pause text
+        pause_title_font = self.daydream_font if self.daydream_font else self.title_font
+        pause_menu_font = self.daydream_font_small if self.daydream_font_small else self.menu_font
+
+        self.draw_text(surface, "PAUSED", pause_title_font, (255, 200, 0),
                        (center_x, self.screen_height // 2 - 40))
 
-        self.draw_text(surface, "Press ENTER to Resume", self.menu_font,
+        self.draw_text(surface, "Press ENTER to Resume", pause_menu_font,
                        self.hud_color, (center_x, self.screen_height // 2 + 20))
-        self.draw_text(surface, "Press Q to Quit to Menu", self.menu_font,
+        self.draw_text(surface, "Press Q to Quit to Menu", pause_menu_font,
                        self.hud_color, (center_x, self.screen_height // 2 + 60))
 
     def _render_leash_indicators(self, surface: pygame.Surface) -> None:
@@ -1594,12 +1731,9 @@ class GameplayScreen(BaseScreen):
 
     def _render_announcement(self, surface: pygame.Surface) -> None:
         """Render a big dramatic announcement in the center of the screen."""
-        # Calculate pulse effect based on timer
-        pulse = 1.0 + 0.1 * abs((self.announcement_timer % 0.4) - 0.2) / 0.2
-
-        # Create large font
-        font_size = int(100 * pulse)
-        large_font = pygame.font.Font(None, font_size)
+        # Use Daydream font for announcement
+        large_font = self.daydream_font if self.daydream_font else pygame.font.Font(None, 100)
+        subtitle_font = self.daydream_font_small if self.daydream_font_small else self.small_font
 
         # Render text with shadow
         shadow_surf = large_font.render(self.announcement_text, True, (0, 0, 0))
@@ -1623,11 +1757,63 @@ class GameplayScreen(BaseScreen):
             subtitle = "Dogs movement is restricted!"
             subtitle2 = None
 
-        subtitle_surf = self.small_font.render(subtitle, True, (255, 255, 255))
+        subtitle_surf = subtitle_font.render(subtitle, True, (255, 255, 255))
         subtitle_rect = subtitle_surf.get_rect(center=(center_x, center_y + 60))
         surface.blit(subtitle_surf, subtitle_rect)
 
         if subtitle2:
-            subtitle2_surf = self.small_font.render(subtitle2, True, (255, 220, 100))
+            subtitle2_surf = subtitle_font.render(subtitle2, True, (255, 220, 100))
             subtitle2_rect = subtitle2_surf.get_rect(center=(center_x, center_y + 85))
             surface.blit(subtitle2_surf, subtitle2_rect)
+
+    def _render_walk_in(self, surface: pygame.Surface) -> None:
+        """Render the walk-in animation - only for Jazzy on the side where Jazzy is playing."""
+        # Only render if we have walking frames (meaning at least one player is Jazzy)
+        if not self.walk_in_frames:
+            return
+
+        # Get current animation frame
+        frame_index = self.walk_in_frame_index % len(self.walk_in_frames)
+        walk_sprite = self.walk_in_frames[frame_index]
+        walk_sprite_height = walk_sprite.get_height()
+        walk_sprite_width = walk_sprite.get_width()
+
+        # Player ground offset is 230, player height/width is 216
+        player_ground_offset = 230
+        player_height = 216
+        player_width = 216
+
+        # Vertical adjustment to move animation up
+        y_offset = -55
+
+        # Horizontal adjustment so walking sprite ends centered where player will be
+        # Player x is set so player center is at arena center
+        # Walking sprite should also be centered at the same position
+        x_center_offset = (player_width - walk_sprite_width) // 2
+
+        # Only render Jazzy walking in on the side where Jazzy is a player
+        # Player 1 side - only if player 1 IS Jazzy
+        if self.walk_in_p1_is_jazzy and self.arena1:
+            # Position so feet align with where player will stand
+            player_feet_y = self.arena1.bounds.bottom - player_ground_offset + player_height
+            p1_render_y = int(player_feet_y - walk_sprite_height) + y_offset
+            p1_render_x = int(self.walk_in_p1_x) + x_center_offset
+            surface.blit(walk_sprite, (p1_render_x, p1_render_y))
+
+        # Player 2 side - only if player 2 IS Jazzy
+        if self.walk_in_p2_is_jazzy and self.arena2:
+            player_feet_y = self.arena2.bounds.bottom - player_ground_offset + player_height
+            p2_render_y = int(player_feet_y - walk_sprite_height) + y_offset
+            p2_render_x = int(self.walk_in_p2_x) + x_center_offset
+            surface.blit(walk_sprite, (p2_render_x, p2_render_y))
+
+        # Draw "GO!" text centered
+        center_x = self.game_area_width // 2
+        center_y = self.screen_height // 2 - 100
+
+        countdown_font = self.daydream_font_countdown if self.daydream_font_countdown else pygame.font.Font(None, 80)
+        countdown_color = (251, 205, 100)  # #FBCD64
+
+        text_surface = countdown_font.render("GO!", True, countdown_color)
+        text_rect = text_surface.get_rect(center=(center_x, center_y))
+        surface.blit(text_surface, text_rect)

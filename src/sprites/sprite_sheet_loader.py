@@ -22,7 +22,7 @@ class SpriteSheetLoader:
     FRAME_COUNT = 3  # 3 frames per animation
 
     # Target gameplay sprite size - large for good visibility
-    GAMEPLAY_SIZE = (144, 144)
+    GAMEPLAY_SIZE = (216, 216)  # 1.5x bigger (was 144x144)
     PORTRAIT_SIZE = (160, 160)
     FOOD_SIZE = (72, 72)  # Snack sprite size - 0.9x of original 80x80
 
@@ -266,3 +266,73 @@ class SpriteSheetLoader:
         self._animation_cache.clear()
         self._portrait_cache.clear()
         self._food_cache.clear()
+
+    def get_walking_frames(self, character_id: str, facing_right: bool = True,
+                           target_size: Tuple[int, int] = None) -> List[pygame.Surface]:
+        """
+        Get walking animation frames from a grid-based walking sprite sheet.
+
+        The walking sprite sheet is an 8x6 grid. Row 2 (0-indexed) contains
+        the side-walking frames facing right.
+
+        Args:
+            character_id: Character identifier (e.g., 'jazzy')
+            facing_right: Direction character is facing
+            target_size: Optional target size for scaling (None = use original frame size)
+
+        Returns:
+            List of pygame Surfaces for the walking animation frames
+        """
+        cache_key = (character_id, 'walking', facing_right, target_size)
+
+        if cache_key in self._animation_cache:
+            return self._animation_cache[cache_key]
+
+        # Build the walking sprite sheet filename
+        name = self.CHARACTER_NAMES.get(character_id, character_id.capitalize())
+        filename = f"{name} walking.png"
+        filepath = os.path.join(self._sprite_path, filename)
+
+        sheet = self._load_sprite_sheet(filepath)
+        if sheet is None:
+            # Cache empty list to avoid repeated warnings
+            self._animation_cache[cache_key] = []
+            return []
+
+        # Extract frames from the 6x6 grid
+        sheet_width = sheet.get_width()
+        sheet_height = sheet.get_height()
+        cols = 6
+        rows = 6
+        frame_width = sheet_width // cols
+        frame_height = sheet_height // rows
+
+        # Use row 2 for right-facing walk
+        walk_row = 2
+
+        frames = []
+        for col in range(cols):
+            x = col * frame_width
+            y = walk_row * frame_height
+            frame_rect = pygame.Rect(x, y, frame_width, frame_height)
+            frame = sheet.subsurface(frame_rect).copy()
+            frames.append(frame)
+
+        # Only scale if target_size is specified
+        if target_size:
+            frames = self._scale_frames(frames, target_size)
+
+        # Flip if facing left
+        if not facing_right:
+            frames = self._flip_frames(frames)
+
+        # Cache the frames
+        self._animation_cache[cache_key] = frames
+
+        # Also cache the opposite direction
+        opposite_key = (character_id, 'walking', not facing_right, target_size)
+        if opposite_key not in self._animation_cache:
+            opposite_frames = self._flip_frames(frames) if facing_right else frames
+            self._animation_cache[opposite_key] = opposite_frames
+
+        return frames
