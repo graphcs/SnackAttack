@@ -1709,16 +1709,22 @@ class GameplayScreen(BaseScreen):
         # Apply effect if any
         effect = result.get("effect")
         if effect:
-            player.apply_effect(
-                effect["type"],
-                effect["magnitude"],
-                effect["duration_seconds"]
-            )
+            # Check if this is a negative effect and player is invincible
+            negative_effects = ["slow", "chaos"]
+            if player.is_invincible and effect["type"] in negative_effects:
+                # Player is invincible - skip negative effect
+                pass
+            else:
+                player.apply_effect(
+                    effect["type"],
+                    effect["magnitude"],
+                    effect["duration_seconds"]
+                )
 
-            # Trigger chaos screen shake
-            if effect["type"] == "chaos":
-                self.shake_intensity = 5
-                self.shake_duration = effect["duration_seconds"]
+                # Trigger chaos screen shake
+                if effect["type"] == "chaos":
+                    self.shake_intensity = 5
+                    self.shake_duration = effect["duration_seconds"]
 
     def _apply_vote_effect(self, vote_type: str) -> None:
         """Apply the winning vote effect to both players."""
