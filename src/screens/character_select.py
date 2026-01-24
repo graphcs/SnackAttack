@@ -241,6 +241,28 @@ class CharacterSelectScreen(BaseScreen):
         cards_per_row = 3  # Match _create_character_cards
         num_cards = len(self.character_cards)
 
+        # Handle navigation when back button is selected
+        if self.back_selected:
+            if key == pygame.K_UP:
+                # Move from back button to bottom row center card
+                self.back_selected = False
+                new_selection = 4  # Center of bottom row
+                if self.active_player == 1:
+                    self.p1_selection = new_selection
+                else:
+                    self.p2_selection = new_selection
+                self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
+                self._update_card_selections()
+                return
+            elif key == pygame.K_RETURN:
+                self._go_back()
+                return
+            elif key == pygame.K_ESCAPE:
+                self._go_back()
+                return
+            # LEFT/RIGHT do nothing when on back button
+            return
+
         # Get current selection based on active player
         if self.active_player == 1:
             current = self.p1_selection
@@ -256,7 +278,15 @@ class CharacterSelectScreen(BaseScreen):
         elif key == pygame.K_UP:
             new_selection = max(0, current - cards_per_row)
         elif key == pygame.K_DOWN:
-            new_selection = min(num_cards - 1, current + cards_per_row)
+            # Check if on bottom row (indices 3, 4, 5)
+            if current >= num_cards - cards_per_row:
+                # Move to back button
+                self.back_selected = True
+                self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
+                self._update_card_selections()
+                return
+            else:
+                new_selection = min(num_cards - 1, current + cards_per_row)
         elif key == pygame.K_RETURN:
             self._confirm_selection()
             return
@@ -273,7 +303,14 @@ class CharacterSelectScreen(BaseScreen):
             elif key == pygame.K_w:
                 new_selection = max(0, current - cards_per_row)
             elif key == pygame.K_s:
-                new_selection = min(num_cards - 1, current + cards_per_row)
+                # Check if on bottom row
+                if current >= num_cards - cards_per_row:
+                    self.back_selected = True
+                    self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
+                    self._update_card_selections()
+                    return
+                else:
+                    new_selection = min(num_cards - 1, current + cards_per_row)
             elif key == pygame.K_SPACE:
                 self._confirm_selection()
                 return
