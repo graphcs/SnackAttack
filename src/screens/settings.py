@@ -50,6 +50,9 @@ class SettingsScreen(BaseScreen):
         self.back_selected = False
         self.select_indicator: Optional[pygame.Surface] = None
 
+        # Daydream font for footer (same size as main menu)
+        self.daydream_font_small: Optional[pygame.font.Font] = None
+
     def on_enter(self, data: Dict[str, Any] = None) -> None:
         """Initialize settings screen."""
         self.initialize_fonts()
@@ -70,6 +73,7 @@ class SettingsScreen(BaseScreen):
             self.menu_font = pygame.font.Font(font_path, 28)
             self.small_font = pygame.font.Font(font_path, 20)
             self.back_font = pygame.font.Font(font_path, 32)
+            self.daydream_font_small = pygame.font.Font(font_path, 18)
 
     def _load_images(self) -> None:
         """Load background and title images."""
@@ -294,9 +298,9 @@ class SettingsScreen(BaseScreen):
             surface.blit(self.menu_tall_image, (menu_x, menu_y))
             menu_bottom_y = menu_y + menu_rect.height
 
-        # Back button (below menu tall image)
+        # Back button (same position as character select screen)
         if self.back_font:
-            back_y = menu_bottom_y - 40
+            back_y = int(self.screen_height * 0.92) - 40
             back_text_color = self.selected_color if self.back_selected else self.back_color
             self.back_button_rect = self.draw_text(surface, "Back", self.back_font, back_text_color,
                                                     (self.screen_width // 2, back_y))
@@ -319,13 +323,11 @@ class SettingsScreen(BaseScreen):
         for item in self.settings_items:
             self._render_setting_item(surface, item)
 
-        # Instructions
-        self.draw_text(surface, "Up/Down to Navigate, Left/Right to Adjust",
-                       self.small_font, (150, 150, 150),
-                       (self.screen_width // 2, self.screen_height - 60))
-        self.draw_text(surface, "Press ESC to Save and Return",
-                       self.small_font, (150, 150, 150),
-                       (self.screen_width // 2, self.screen_height - 30))
+        # Instructions - same as main menu
+        footer_font = self.daydream_font_small if self.daydream_font_small else self.small_font
+        self.draw_text(surface, "Arrow Keys + Enter to Select",
+                       footer_font, (147, 76, 48),
+                       (self.screen_width // 2, self.screen_height - 40))
 
     def _render_setting_item(self, surface: pygame.Surface, item: SettingItem) -> None:
         """Render a single setting item with proportional positioning."""

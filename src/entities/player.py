@@ -27,10 +27,13 @@ class Player:
         self.base_speed = character_config.get("base_speed", 1.0)
         self.color = tuple(character_config.get("color", [255, 255, 255]))
 
-        # Use larger sprite size from SpriteSheetLoader
+        # Use character-specific sprite size from SpriteSheetLoader
         from ..sprites.sprite_sheet_loader import SpriteSheetLoader
-        self.width = SpriteSheetLoader.GAMEPLAY_SIZE[0]
-        self.height = SpriteSheetLoader.GAMEPLAY_SIZE[1]
+        size = SpriteSheetLoader.CHARACTER_SIZES.get(
+            self.character_id, SpriteSheetLoader.GAMEPLAY_SIZE
+        )
+        self.width = size[0]
+        self.height = size[1]
 
         self.arena_bounds = arena_bounds
         self.player_num = player_num
@@ -63,8 +66,8 @@ class Player:
         self.leash_extend_amount = int(arena_width * 0.15)  # Extend 15% more
         self.leash_yank_amount = int(arena_width * 0.35)  # Restrict by 35% (very noticeable!)
 
-        # Animation state
-        self.facing_right = True
+        # Animation state - player 1 faces right, player 2 faces left
+        self.facing_right = (player_num == 1)
         self.is_moving = False
 
         # Animation controller (lazy initialization)
@@ -292,6 +295,9 @@ class Player:
         self.steam_particles.clear()
         self.speed_lines.clear()
 
+        # Reset facing direction: player 1 faces right, player 2 faces left
+        self.facing_right = (self.player_num == 1)
+
         # Reset animation state
         if self._animation_controller is not None:
             self._animation_controller.reset()
@@ -376,6 +382,10 @@ class Player:
         """
         render_x = int(self.x - self.arena_bounds.left + offset[0])
         render_y = int(self.y - self.arena_bounds.top + offset[1])
+
+        # Adjust Prissy's position slightly downward
+        if self.character_id == 'prissy':
+            render_y += 15
 
         # Get current animation frame from animation controller
         sprite = self.animation_controller.get_current_sprite()

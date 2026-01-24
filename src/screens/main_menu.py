@@ -46,6 +46,9 @@ class MainMenuScreen(BaseScreen):
         }
         self.select_indicator: Optional[pygame.Surface] = None
 
+        # Daydream font for footer
+        self.daydream_font_small: Optional[pygame.font.Font] = None
+
     def on_enter(self, data: Dict[str, Any] = None) -> None:
         """Initialize menu when entering screen."""
         self.initialize_fonts()
@@ -54,7 +57,7 @@ class MainMenuScreen(BaseScreen):
 
         # Create menu items with proportional positioning
         center_x = self.screen_width // 2
-        start_y = int(self.screen_height * 0.62) - 4
+        start_y = int(self.screen_height * 0.65) - 4  # Adjusted position
 
         # Calculate spacing based on button height + 10 pixel gap
         btn_height = 40  # Default height
@@ -82,6 +85,11 @@ class MainMenuScreen(BaseScreen):
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         ui_dir = os.path.join(base_dir, "ui")
 
+        # Load Daydream font for footer
+        font_path = os.path.join(ui_dir, "Daydream.ttf")
+        if os.path.exists(font_path):
+            self.daydream_font_small = pygame.font.Font(font_path, 18)
+
         # Load background image
         bg_path = os.path.join(ui_dir, "Home background.png")
         if os.path.exists(bg_path):
@@ -99,7 +107,7 @@ class MainMenuScreen(BaseScreen):
             logo_max_height = int(self.screen_height * 0.35)
             logo_rect = self.logo_image.get_rect()
             scale = min(logo_max_width / logo_rect.width, logo_max_height / logo_rect.height)
-            scale *= 1.2  # Make logo 1.2x bigger
+            scale *= 1.26  # Make logo 1.26x bigger (1.2 * 1.05)
             new_width = int(logo_rect.width * scale)
             new_height = int(logo_rect.height * scale)
             self.logo_image = pygame.transform.scale(self.logo_image, (new_width, new_height))
@@ -113,7 +121,7 @@ class MainMenuScreen(BaseScreen):
             menu_ui_max_height = int(self.screen_height * 0.25)
             menu_ui_rect = self.menu_ui_image.get_rect()
             scale = min(menu_ui_max_width / menu_ui_rect.width, menu_ui_max_height / menu_ui_rect.height)
-            scale *= 1.35  # Make menu UI 1.35x bigger
+            scale *= 1.4175  # Make menu UI 1.4175x bigger (1.35 * 1.05)
             new_width = int(menu_ui_rect.width * scale)
             new_height = int(menu_ui_rect.height * scale)
             self.menu_ui_image = pygame.transform.scale(self.menu_ui_image, (new_width, new_height))
@@ -125,7 +133,7 @@ class MainMenuScreen(BaseScreen):
             "settings": "settings button.png",
             "quit": "quit button.png"
         }
-        button_scale = 0.576  # Scale factor for buttons
+        button_scale = 0.6048  # Scale factor for buttons (0.576 * 1.05)
         for action, filename in button_files.items():
             btn_path = os.path.join(ui_dir, filename)
             if os.path.exists(btn_path):
@@ -240,7 +248,7 @@ class MainMenuScreen(BaseScreen):
         if self.menu_ui_image:
             menu_ui_rect = self.menu_ui_image.get_rect()
             menu_ui_x = (self.screen_width - menu_ui_rect.width) // 2
-            menu_ui_y = int(self.screen_height * 0.50)
+            menu_ui_y = int(self.screen_height * 0.53)  # Adjusted position
             surface.blit(self.menu_ui_image, (menu_ui_x, menu_ui_y))
 
         # Menu items (button images on top of menu UI)
@@ -272,11 +280,9 @@ class MainMenuScreen(BaseScreen):
                 item.rect = self.draw_text(surface, item.text, self.menu_font, color,
                                            (center_x, item.y_position))
 
-        # Footer
-        self.draw_text(surface, "Use Arrow Keys + Enter to select",
-                       self.small_font, (150, 150, 150),
-                       (self.screen_width // 2, self.screen_height - 60))
+        # Footer - use Daydream font
+        footer_font = self.daydream_font_small if self.daydream_font_small else self.small_font
+        self.draw_text(surface, "Arrow Keys + Enter to Select",
+                       footer_font, (147, 76, 48),
+                       (self.screen_width // 2, self.screen_height - 40))
 
-        # Version
-        self.draw_text(surface, "v1.0", self.small_font, (100, 100, 100),
-                       (self.screen_width - 50, self.screen_height - 30))

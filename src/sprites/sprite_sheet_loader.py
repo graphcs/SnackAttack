@@ -26,6 +26,11 @@ class SpriteSheetLoader:
     PORTRAIT_SIZE = (160, 160)
     FOOD_SIZE = (72, 72)  # Snack sprite size - 0.9x of original 80x80
 
+    # Character-specific gameplay sizes (overrides GAMEPLAY_SIZE)
+    CHARACTER_SIZES = {
+        'prissy': (173, 173),  # 0.8x of 216
+    }
+
     # Animation timing (in seconds)
     RUN_FRAME_DURATION = 0.1      # 10 FPS for run cycle
     EAT_FRAME_DURATION = 0.12     # Slightly slower for eat
@@ -175,9 +180,10 @@ class SpriteSheetLoader:
             print(f"Warning: Could not load sprite sheet for {character_id} {animation_type}")
             return []
 
-        # Extract and scale frames
+        # Extract and scale frames (use character-specific size if available)
         frames = self._extract_frames(sheet)
-        frames = self._scale_frames(frames, self.GAMEPLAY_SIZE)
+        target_size = self.CHARACTER_SIZES.get(character_id, self.GAMEPLAY_SIZE)
+        frames = self._scale_frames(frames, target_size)
 
         # Flip if facing left (sprites are drawn facing right)
         if not facing_right:
@@ -195,7 +201,7 @@ class SpriteSheetLoader:
             else:
                 # We have left-facing (flipped), load original for right
                 original_frames = self._extract_frames(sheet)
-                original_frames = self._scale_frames(original_frames, self.GAMEPLAY_SIZE)
+                original_frames = self._scale_frames(original_frames, target_size)
                 opposite_frames = original_frames
             self._animation_cache[opposite_key] = opposite_frames
 
@@ -299,24 +305,53 @@ class SpriteSheetLoader:
             self._animation_cache[cache_key] = []
             return []
 
-        # Extract frames from the 6x6 grid
+        # Extract frames - different characters have different layouts
         sheet_width = sheet.get_width()
         sheet_height = sheet.get_height()
-        cols = 6
-        rows = 6
-        frame_width = sheet_width // cols
-        frame_height = sheet_height // rows
 
-        # Use row 2 for right-facing walk
-        walk_row = 2
+        if character_id == 'prissy':
+            # Prissy walking sprite is a 3x2 grid (6 frames total)
+            cols = 3
+            rows = 2
+            frame_width = sheet_width // cols
+            frame_height = sheet_height // rows
 
-        frames = []
-        for col in range(cols):
-            x = col * frame_width
-            y = walk_row * frame_height
-            frame_rect = pygame.Rect(x, y, frame_width, frame_height)
-            frame = sheet.subsurface(frame_rect).copy()
-            frames.append(frame)
+            # Extract all 6 frames (row by row, left to right)
+            frames = []
+            for row in range(rows):
+                for col in range(cols):
+                    x = col * frame_width
+                    y = row * frame_height
+                    frame_rect = pygame.Rect(x, y, frame_width, frame_height)
+                    frame = sheet.subsurface(frame_rect).copy()
+                    frames.append(frame)
+        elif character_id == 'dash':
+            # Dash walking sprite is a horizontal strip with 5 frames
+            cols = 5
+            frame_width = sheet_width // cols
+            frame_height = sheet_height
+
+            frames = []
+            for col in range(cols):
+                x = col * frame_width
+                frame_rect = pygame.Rect(x, 0, frame_width, frame_height)
+                frame = sheet.subsurface(frame_rect).copy()
+                frames.append(frame)
+        else:
+            # Other characters use 6x6 grid, row 2 for walking
+            cols = 6
+            rows = 6
+            frame_width = sheet_width // cols
+            frame_height = sheet_height // rows
+            walk_row = 2
+
+            frames = []
+            for col in range(cols):
+                x = col * frame_width
+                y = walk_row * frame_height
+                frame_rect = pygame.Rect(x, y, frame_width, frame_height)
+                frame = sheet.subsurface(frame_rect).copy()
+                frames.append(frame)
 
         # Only scale if target_size is specified
         if target_size:
