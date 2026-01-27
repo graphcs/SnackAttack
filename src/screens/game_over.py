@@ -39,6 +39,7 @@ class GameOverScreen(BaseScreen):
         self.daydream_font_score: Optional[pygame.font.Font] = None
         self.daydream_font_small: Optional[pygame.font.Font] = None
         self.daydream_font_winner: Optional[pygame.font.Font] = None
+        self.daydream_font_footer: Optional[pygame.font.Font] = None
 
         # Colors
         self.bg_color = (20, 20, 40)
@@ -75,10 +76,11 @@ class GameOverScreen(BaseScreen):
 
         if os.path.exists(font_path):
             self.daydream_font = pygame.font.Font(font_path, 28)
-            self.daydream_font_large = pygame.font.Font(font_path, 41)  # 1.2x bigger for names
-            self.daydream_font_score = pygame.font.Font(font_path, 58)  # 1.2x bigger for scores
-            self.daydream_font_small = pygame.font.Font(font_path, 23)  # Small for "score" label (1.2x again)
+            self.daydream_font_large = pygame.font.Font(font_path, 43)  # 0.95x for names
+            self.daydream_font_score = pygame.font.Font(font_path, 61)  # 0.95x for scores
+            self.daydream_font_small = pygame.font.Font(font_path, 24)  # 0.95x for "score" label
             self.daydream_font_winner = pygame.font.Font(font_path, 80)  # Large for winner name (1.2x again)
+            self.daydream_font_footer = pygame.font.Font(font_path, 18)  # Footer instructions
 
     def _load_background(self) -> None:
         """Load the win screen background image and UI elements."""
@@ -97,8 +99,8 @@ class GameOverScreen(BaseScreen):
         if os.path.exists(menu_square_path):
             self.menu_square_image = pygame.image.load(menu_square_path).convert_alpha()
             # Scale to 0.95x of previous size
-            box_width = int(self.screen_width * 0.449)  # 0.4725 * 0.95
-            box_height = int(self.screen_height * 0.499)  # 0.525 * 0.95
+            box_width = int(self.screen_width * 0.469)  # 0.4939 * 0.95
+            box_height = int(self.screen_height * 0.521)  # 0.5489 * 0.95
             self.menu_square_image = pygame.transform.scale(
                 self.menu_square_image, (box_width, box_height)
             )
@@ -263,10 +265,10 @@ class GameOverScreen(BaseScreen):
         surface.blit(p2_surface, p2_rect)
 
         # Score boxes - side by side with proportional sizing (0.95x of previous)
-        box_width = int(self.screen_width * 0.449)  # 0.4725 * 0.95
-        box_height = int(self.screen_height * 0.499)  # 0.525 * 0.95
+        box_width = int(self.screen_width * 0.469)  # 0.4939 * 0.95
+        box_height = int(self.screen_height * 0.521)  # 0.5489 * 0.95
         box_y = int(self.screen_height * 0.30) + 50  # Moved down 50 pixels
-        box_gap = -40  # Overlap cards more (10 pixels closer)
+        box_gap = -70  # Overlap cards more to bring them closer
 
         # Color for dog names and scores
         name_color = (147, 76, 48)  # #934C30
@@ -346,7 +348,3 @@ class GameOverScreen(BaseScreen):
                 icon_y = option_y - self.select_icon.get_height() // 2
                 surface.blit(self.select_icon, (icon_x, icon_y))
 
-        # Instructions
-        self.draw_text(surface, "Up/Down + Enter to Select",
-                       self.small_font, (150, 150, 150),
-                       (self.screen_width // 2, self.screen_height - 40))

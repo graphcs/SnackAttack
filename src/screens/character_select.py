@@ -44,11 +44,6 @@ class CharacterSelectScreen(BaseScreen):
         self.p1_confirmed = False
         self.p2_confirmed = False
 
-        # AI difficulty selection (for 1P mode)
-        self.difficulties = ["easy", "medium", "hard"]
-        self.selected_difficulty = 1  # Medium by default
-        self.selecting_difficulty = False
-
         # Colors - dark blue theme like reference
         self.bg_color = (20, 30, 60)
         self.p1_color = (100, 180, 255)
@@ -85,8 +80,6 @@ class CharacterSelectScreen(BaseScreen):
         self.active_player = 1
         self.p1_confirmed = False
         self.p2_confirmed = False
-        self.selecting_difficulty = False
-        self.selected_difficulty = 1
 
         # Create character cards
         self._create_character_cards()
@@ -112,7 +105,7 @@ class CharacterSelectScreen(BaseScreen):
 
         total_width = cards_per_row * card_width + (cards_per_row - 1) * padding_x
         start_x = (self.screen_width - total_width) // 2
-        start_y = int(self.screen_height * 0.28)
+        start_y = int(self.screen_height * 0.32)  # Moved down
 
         self.character_cards = []
         for i, char_config in enumerate(ordered_characters):
@@ -170,7 +163,7 @@ class CharacterSelectScreen(BaseScreen):
             title_max_height = int(self.screen_height * 0.12)
             title_rect = self.title_image.get_rect()
             scale = min(title_max_width / title_rect.width, title_max_height / title_rect.height)
-            scale *= 1.5  # Make title 1.5x bigger
+            scale *= 1.65  # Make title bigger
             new_width = int(title_rect.width * scale)
             new_height = int(title_rect.height * scale)
             self.title_image = pygame.transform.scale(self.title_image, (new_width, new_height))
@@ -203,10 +196,7 @@ class CharacterSelectScreen(BaseScreen):
     def handle_event(self, event: pygame.event.Event) -> None:
         """Handle input events."""
         if event.type == pygame.KEYDOWN:
-            if self.selecting_difficulty:
-                self._handle_difficulty_input(event.key)
-            else:
-                self._handle_selection_input(event.key)
+            self._handle_selection_input(event.key)
 
         elif event.type == pygame.MOUSEMOTION:
             # Handle hover on back button
@@ -215,43 +205,63 @@ class CharacterSelectScreen(BaseScreen):
             else:
                 self.back_selected = False
 
-            # Handle hover on character cards (only when not selecting difficulty)
-            if not self.selecting_difficulty:
-                for i, card in enumerate(self.character_cards):
-                    if card.rect.collidepoint(event.pos):
-                        # Update selection based on active player
-                        old_selection = self.p1_selection if self.active_player == 1 else self.p2_selection
-                        if self.active_player == 1:
-                            self.p1_selection = i
-                        else:
-                            self.p2_selection = i
-                        if old_selection != i:
-                            self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
-                        self._update_card_selections()
-                        break
+            # Handle hover on character cards
+            for i, card in enumerate(self.character_cards):
+                if card.rect.collidepoint(event.pos):
+                    # Update selection based on active player
+                    old_selection = self.p1_selection if self.active_player == 1 else self.p2_selection
+                    if self.active_player == 1:
+                        self.p1_selection = i
+                    else:
+                        self.p2_selection = i
+                    if old_selection != i:
+                        self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
+                    self._update_card_selections()
+                    break
 
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # Left click
                 if self.back_button_rect and self.back_button_rect.collidepoint(event.pos):
                     self.state_machine.change_state(GameState.MAIN_MENU)
 
-                # Handle click on character cards (only when not selecting difficulty)
-                if not self.selecting_difficulty:
-                    for i, card in enumerate(self.character_cards):
-                        if card.rect.collidepoint(event.pos):
-                            # Update selection and confirm
-                            if self.active_player == 1:
-                                self.p1_selection = i
-                            else:
-                                self.p2_selection = i
-                            self._update_card_selections()
-                            self._confirm_selection()
-                            break
+                # Handle click on character cards
+                for i, card in enumerate(self.character_cards):
+                    if card.rect.collidepoint(event.pos):
+                        # Update selection and confirm
+                        if self.active_player == 1:
+                            self.p1_selection = i
+                        else:
+                            self.p2_selection = i
+                        self._update_card_selections()
+                        self._confirm_selection()
+                        break
 
     def _handle_selection_input(self, key: int) -> None:
         """Handle character selection input."""
         cards_per_row = 3  # Match _create_character_cards
         num_cards = len(self.character_cards)
+
+        # Handle navigation when back button is selected
+        if self.back_selected:
+            if key == pygame.K_UP:
+                # Move from back button to bottom row center card
+                self.back_selected = False
+                new_selection = 4  # Center of bottom row
+                if self.active_player == 1:
+                    self.p1_selection = new_selection
+                else:
+                    self.p2_selection = new_selection
+                self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
+                self._update_card_selections()
+                return
+            elif key == pygame.K_RETURN:
+                self._go_back()
+                return
+            elif key == pygame.K_ESCAPE:
+                self._go_back()
+                return
+            # LEFT/RIGHT do nothing when on back button
+            return
 
         # Get current selection based on active player
         if self.active_player == 1:
@@ -268,7 +278,15 @@ class CharacterSelectScreen(BaseScreen):
         elif key == pygame.K_UP:
             new_selection = max(0, current - cards_per_row)
         elif key == pygame.K_DOWN:
-            new_selection = min(num_cards - 1, current + cards_per_row)
+            # Check if on bottom row (indices 3, 4, 5)
+            if current >= num_cards - cards_per_row:
+                # Move to back button
+                self.back_selected = True
+                self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
+                self._update_card_selections()
+                return
+            else:
+                new_selection = min(num_cards - 1, current + cards_per_row)
         elif key == pygame.K_RETURN:
             self._confirm_selection()
             return
@@ -285,7 +303,14 @@ class CharacterSelectScreen(BaseScreen):
             elif key == pygame.K_w:
                 new_selection = max(0, current - cards_per_row)
             elif key == pygame.K_s:
-                new_selection = min(num_cards - 1, current + cards_per_row)
+                # Check if on bottom row
+                if current >= num_cards - cards_per_row:
+                    self.back_selected = True
+                    self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
+                    self._update_card_selections()
+                    return
+                else:
+                    new_selection = min(num_cards - 1, current + cards_per_row)
             elif key == pygame.K_SPACE:
                 self._confirm_selection()
                 return
@@ -302,30 +327,13 @@ class CharacterSelectScreen(BaseScreen):
 
         self._update_card_selections()
 
-    def _handle_difficulty_input(self, key: int) -> None:
-        """Handle difficulty selection input."""
-        old_difficulty = self.selected_difficulty
-        if key == pygame.K_LEFT:
-            self.selected_difficulty = max(0, self.selected_difficulty - 1)
-        elif key == pygame.K_RIGHT:
-            self.selected_difficulty = min(2, self.selected_difficulty + 1)
-
-        if self.selected_difficulty != old_difficulty:
-            self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
-
-        if key == pygame.K_RETURN:
-            self._start_game()
-        elif key == pygame.K_ESCAPE:
-            self.selecting_difficulty = False
-            self.p1_confirmed = False
-
     def _confirm_selection(self) -> None:
         """Confirm current player's selection."""
         if self.active_player == 1:
             self.p1_confirmed = True
             if self.vs_ai:
-                # Go to difficulty selection
-                self.selecting_difficulty = True
+                # Go directly to game with default difficulty (medium)
+                self._start_game()
             else:
                 # Switch to P2 selection
                 self.active_player = 2
@@ -337,10 +345,7 @@ class CharacterSelectScreen(BaseScreen):
 
     def _go_back(self) -> None:
         """Go back to previous state or screen."""
-        if self.selecting_difficulty:
-            self.selecting_difficulty = False
-            self.p1_confirmed = False
-        elif self.p1_confirmed and not self.vs_ai:
+        if self.p1_confirmed and not self.vs_ai:
             self.p1_confirmed = False
             self.active_player = 1
             self.p2_selection = None  # Reset P2 selection
@@ -361,7 +366,7 @@ class CharacterSelectScreen(BaseScreen):
             available = [c for i, c in enumerate(self.character_cards)
                          if i != self.p1_selection]
             p2_char = random.choice(available).config if available else p1_char
-            difficulty = self.difficulties[self.selected_difficulty]
+            difficulty = "medium"  # Default difficulty
         else:
             p2_char = self.character_cards[self.p2_selection].config
             difficulty = None
@@ -390,12 +395,12 @@ class CharacterSelectScreen(BaseScreen):
         if self.title_image:
             title_rect = self.title_image.get_rect()
             title_x = (self.screen_width - title_rect.width) // 2
-            title_y = int(self.screen_height * 0.08)
+            title_y = int(self.screen_height * 0.08)  # Moved up
             surface.blit(self.title_image, (title_x, title_y))
 
         # Player indicator
         if not self.vs_ai and self.back_font:
-            indicator_y = int(self.screen_height * 0.30)
+            indicator_y = int(self.screen_height * 0.33)
             if self.active_player == 1:
                 choose_text = "Player 1 Select"
                 choose_color = self.p1_color
@@ -410,7 +415,7 @@ class CharacterSelectScreen(BaseScreen):
             self._render_card(surface, card)
 
         # Back button (at same position as settings screen)
-        if self.back_font and not self.selecting_difficulty:
+        if self.back_font:
             # Calculate position similar to settings screen
             back_y = int(self.screen_height * 0.92) - 40
             back_text_color = self.back_selected_color if self.back_selected else self.back_color
@@ -424,17 +429,9 @@ class CharacterSelectScreen(BaseScreen):
                 select_y = self.back_button_rect.centery - select_rect.height // 2
                 surface.blit(self.select_indicator, (select_x, select_y))
 
-        # Difficulty selection overlay
-        if self.selecting_difficulty:
-            self._render_difficulty_selection(surface)
-
         # Instructions at bottom
-        if not self.selecting_difficulty:
-            instructions = "Arrow Keys + Enter to Select"
-            if not self.vs_ai:
-                instructions = "WASD/Arrow Keys + Enter to Select"
-            self.draw_text(surface, instructions, self.small_font, (120, 130, 150),
-                           (self.screen_width // 2, self.screen_height - 30))
+        self.draw_text(surface, "Arrow Keys + Enter to Select", self.small_font, (147, 76, 48),
+                       (self.screen_width // 2, self.screen_height - 40))
 
     def _render_card(self, surface: pygame.Surface, card: CharacterCard) -> None:
         """Render a character card with profile image."""
@@ -494,41 +491,3 @@ class CharacterSelectScreen(BaseScreen):
             name_color = self.highlight_color if (card.selected_p1 or card.selected_p2) else self.text_color
             self.draw_text(surface, card.name.upper(), self.menu_font, name_color,
                            (card.rect.centerx, card.rect.centery))
-
-    def _render_difficulty_selection(self, surface: pygame.Surface) -> None:
-        """Render difficulty selection overlay with proportional positioning."""
-        # Semi-transparent overlay
-        overlay = pygame.Surface((self.screen_width, self.screen_height))
-        overlay.fill((0, 0, 0))
-        overlay.set_alpha(200)
-        surface.blit(overlay, (0, 0))
-
-        # Title with proportional positioning
-        title_y = int(self.screen_height * 0.40)
-        self.draw_text(surface, "SELECT DIFFICULTY", self.title_font,
-                       self.highlight_color, (self.screen_width // 2, title_y))
-
-        # Difficulty options - horizontal layout
-        option_y = int(self.screen_height * 0.55)
-        option_spacing = int(self.screen_width * 0.20)
-        start_x = self.screen_width // 2 - option_spacing
-
-        for i, diff in enumerate(self.difficulties):
-            x = start_x + i * option_spacing
-            color = self.highlight_color if i == self.selected_difficulty else (150, 150, 150)
-
-            # Draw box around selected
-            if i == self.selected_difficulty:
-                box_width = int(self.screen_width * 0.20)
-                box_height = 70
-                box_rect = pygame.Rect(x - box_width // 2, option_y - box_height // 2, box_width, box_height)
-                pygame.draw.rect(surface, (147, 76, 48), box_rect, border_radius=8)  # #934C30
-                pygame.draw.rect(surface, self.highlight_color, box_rect, 3, border_radius=8)
-
-            self.draw_text(surface, diff.upper(), self.menu_font,
-                           color, (x, option_y))
-
-        # Instructions
-        self.draw_text(surface, "Left/Right Arrow Keys + Enter to Confirm",
-                       self.small_font, (150, 150, 150),
-                       (self.screen_width // 2, self.screen_height - 60))

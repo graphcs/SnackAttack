@@ -3,7 +3,7 @@
 import os
 import pygame
 import random
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from .base_screen import BaseScreen, GAME_AREA_WIDTH
 from ..core.state_machine import GameState
 from ..core.event_bus import GameEvent
@@ -32,7 +32,7 @@ class FallingSnack:
 
         self.arena_bounds = arena_bounds
         self.x = x
-        self.y = arena_bounds.top - self.height  # Start just above arena
+        self.y = arena_bounds.top + 60  # Start lower, below menu bar
         self.fall_speed = fall_speed
 
         # Ground level where snacks disappear (at player's feet level)
@@ -130,12 +130,49 @@ class Arena:
         # So player bottom (feet) is at bounds.bottom - 160 + 144 = bounds.bottom - 16
         self.ground_y = bounds.bottom - 16
 
+        # Cloud spawn position (center x of cloud where snacks drop from)
+        self.cloud_spawn_x: Optional[float] = None
+
+        # Lightning effect for when food drops
+        self.lightning_active = False
+        self.lightning_timer = 0.0
+        self.lightning_duration = 0.08  # Duration of lightning effect (quick flash)
+        self.lightning_segments: List[Tuple[Tuple[int, int], Tuple[int, int]]] = []
+        self.lightning_color = (255, 255, 100)  # Current lightning color
+        self.lightning_colors = [
+            (255, 255, 100),  # Yellow
+            (100, 200, 255),  # Cyan
+            (255, 100, 255),  # Magenta
+            (255, 150, 50),   # Orange
+            (150, 255, 150),  # Light green
+            (255, 100, 100),  # Light red
+        ]
+        self.pending_snack: Optional[Dict[str, Any]] = None
+        self.pending_snack_x: float = 0
+
+        # Load thunder sound effect
+        self.thunder_sound: Optional[pygame.mixer.Sound] = None
+        self.thunder_played_this_round = False  # Only play once per round
+        try:
+            import os
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            thunder_path = os.path.join(base_dir, "Sound effect", "Thunder.mp3")
+            if os.path.exists(thunder_path):
+                self.thunder_sound = pygame.mixer.Sound(thunder_path)
+                self.thunder_sound.set_volume(0.8)
+        except Exception as e:
+            print(f"Could not load thunder sound: {e}")
+
         # Create surface for this arena (with alpha for transparency)
         self.surface = pygame.Surface((bounds.width, bounds.height), pygame.SRCALPHA)
 
     def spawn_snack(self, snack_configs: List[Dict[str, Any]]) -> Optional[FallingSnack]:
-        """Spawn a new falling snack at the top of the arena."""
+        """Trigger lightning and queue snack spawn."""
         if len(self.snacks) >= self.max_snacks:
+            return None
+
+        # Don't spawn if lightning is already active
+        if self.lightning_active:
             return None
 
         # Filter available snacks by pool
@@ -156,19 +193,90 @@ class Arena:
                 selected = snack_config
                 break
 
-        # Random X position within arena
+        # X position - spawn from cloud if available, otherwise random
         from ..sprites.sprite_sheet_loader import SpriteSheetLoader
         snack_size = SpriteSheetLoader.FOOD_SIZE[0]
         padding = 20
-        x = random.randint(self.bounds.left + padding,
-                          self.bounds.right - padding - snack_size)
 
-        snack = FallingSnack(selected, x, self.bounds, self.fall_speed, self.ground_y)
+        if self.cloud_spawn_x is not None:
+            # Spawn from cloud position with some variance
+            variance = 120  # Random spread around cloud center (wider range)
+            x = int(self.cloud_spawn_x + random.uniform(-variance, variance))
+            # Clamp to arena bounds
+            x = max(self.bounds.left + padding, min(x, self.bounds.right - padding - snack_size))
+        else:
+            # Fallback to random position
+            x = random.randint(self.bounds.left + padding,
+                              self.bounds.right - padding - snack_size)
+
+        # Trigger lightning effect before spawning
+        self._trigger_lightning(x)
+        self.pending_snack = selected
+        self.pending_snack_x = x
+        return None
+
+    def _trigger_lightning(self, target_x: float) -> None:
+        """Trigger a lightning bolt animation from cloud to target position."""
+        self.lightning_active = True
+        self.lightning_timer = self.lightning_duration
+        self.lightning_color = random.choice(self.lightning_colors)
+
+        # Play thunder sound (only once per round)
+        if self.thunder_sound and not self.thunder_played_this_round:
+            self.thunder_sound.play()
+            self.thunder_played_this_round = True
+
+        # Generate lightning bolt segments (jagged line from cloud to target)
+        self.lightning_segments = []
+        if self.cloud_spawn_x is not None:
+            start_x = self.cloud_spawn_x - self.bounds.left
+            start_y = 50  # Start lower (below cloud)
+        else:
+            start_x = target_x - self.bounds.left
+            start_y = 50
+
+        end_x = target_x - self.bounds.left
+        end_y = 130  # Where food starts (lower position)
+
+        # Create jagged lightning path
+        num_segments = 6
+        points = [(start_x, start_y)]
+        for i in range(1, num_segments):
+            progress = i / num_segments
+            mid_x = start_x + (end_x - start_x) * progress + random.uniform(-30, 30)
+            mid_y = start_y + (end_y - start_y) * progress
+            points.append((mid_x, mid_y))
+        points.append((end_x, end_y))
+
+        # Convert to line segments
+        for i in range(len(points) - 1):
+            self.lightning_segments.append((points[i], points[i + 1]))
+
+    def _spawn_pending_snack(self) -> Optional[FallingSnack]:
+        """Actually spawn the pending snack after lightning."""
+        if self.pending_snack is None:
+            return None
+
+        snack = FallingSnack(self.pending_snack, self.pending_snack_x, self.bounds,
+                            self.fall_speed, self.ground_y)
         self.snacks.append(snack)
+        self.pending_snack = None
         return snack
 
     def update(self, dt: float, snack_configs: List[Dict[str, Any]]) -> None:
         """Update arena state."""
+        # Update lightning animation
+        if self.lightning_active:
+            self.lightning_timer -= dt
+            # Randomly change lightning color during animation for colorful effect
+            if random.random() < 0.3:  # 30% chance each frame to change color
+                self.lightning_color = random.choice(self.lightning_colors)
+            if self.lightning_timer <= 0:
+                self.lightning_active = False
+                self.lightning_segments = []
+                # Spawn the pending snack
+                self._spawn_pending_snack()
+
         # Update spawn timer
         self.spawn_timer -= dt
         if self.spawn_timer <= 0:
@@ -185,13 +293,31 @@ class Arena:
         self.surface.fill((0, 0, 0, 0))
 
         if self.background_image:
-            # Use the background image - scale to width, smaller height
-            scaled_height = int(self.bounds.height * 0.65)
+            # Use the background image - preserve aspect ratio
+            img_width = self.background_image.get_width()
+            img_height = self.background_image.get_height()
+            aspect_ratio = img_width / img_height
+
+            # Scale to fit arena width while preserving aspect ratio
+            scaled_width = self.bounds.width
+            scaled_height = int(scaled_width / aspect_ratio)
+
+            # If too tall, scale to height instead
+            max_height = int(self.bounds.height * 0.75)
+            if scaled_height > max_height:
+                scaled_height = max_height
+                scaled_width = int(scaled_height * aspect_ratio)
+
+            # Apply 1.1x scale
+            scaled_width = int(scaled_width * 1.1)
+            scaled_height = int(scaled_height * 1.1)
+
             scaled_bg = pygame.transform.scale(self.background_image,
-                (self.bounds.width, scaled_height))
-            # Position at bottom of arena
+                (scaled_width, scaled_height))
+            # Center horizontally, position at bottom of arena
+            bg_x = (self.bounds.width - scaled_width) // 2
             bg_y = self.bounds.height - scaled_height
-            self.surface.blit(scaled_bg, (0, bg_y))
+            self.surface.blit(scaled_bg, (bg_x, bg_y))
         else:
             # Fallback to wooden floor
             from ..sprites.pixel_art import draw_wooden_floor, draw_fence_border
@@ -203,6 +329,10 @@ class Arena:
         # Draw the leash
         self._draw_leash()
 
+        # Draw lightning effect
+        if self.lightning_active and self.lightning_segments:
+            self._draw_lightning()
+
         # Draw snacks
         for snack in self.snacks:
             snack.render(self.surface)
@@ -212,17 +342,51 @@ class Arena:
 
         return self.surface
 
+    def _draw_lightning(self) -> None:
+        """Draw colorful lightning bolt effect."""
+        if not self.lightning_segments:
+            return
+
+        # Draw multiple layers for glow effect
+        for thickness, alpha_mult in [(8, 0.3), (5, 0.5), (3, 0.8), (2, 1.0)]:
+            color = (
+                min(255, int(self.lightning_color[0] * alpha_mult + 255 * (1 - alpha_mult))),
+                min(255, int(self.lightning_color[1] * alpha_mult + 255 * (1 - alpha_mult))),
+                min(255, int(self.lightning_color[2] * alpha_mult + 255 * (1 - alpha_mult)))
+            )
+            for start, end in self.lightning_segments:
+                pygame.draw.line(self.surface, color,
+                               (int(start[0]), int(start[1])),
+                               (int(end[0]), int(end[1])), thickness)
+
+        # Add small branches for more detail
+        for start, end in self.lightning_segments:
+            if random.random() < 0.5:  # 50% chance for branch
+                mid_x = (start[0] + end[0]) / 2
+                mid_y = (start[1] + end[1]) / 2
+                branch_end_x = mid_x + random.uniform(-25, 25)
+                branch_end_y = mid_y + random.uniform(10, 25)
+                pygame.draw.line(self.surface, self.lightning_color,
+                               (int(mid_x), int(mid_y)),
+                               (int(branch_end_x), int(branch_end_y)), 2)
+
     def _draw_leash(self) -> None:
-        """Draw a visible leash from the left wall to the dog's collar."""
+        """Draw a visible leash from the wall to the dog's collar."""
         import math
 
-        # Leash anchor point on left wall (where it's tied)
-        anchor_x = 15
+        # Leash anchor point - left wall for player 1, right wall for player 2
+        if self.player.player_num == 2:
+            anchor_x = self.bounds.width - 15  # Right side for player 2
+        else:
+            anchor_x = 15  # Left side for player 1
         anchor_y = self.bounds.height - 100  # Near ground level
 
-        # Dog's collar position (center-left of dog sprite, relative to arena)
-        dog_x = self.player.x - self.bounds.left + 20  # Left side of dog
-        dog_y = self.player.y - self.bounds.top + 40  # Near neck/collar
+        # Dog's collar position (closer to dog's body, relative to arena)
+        dog_x = self.player.x - self.bounds.left + 70  # Closer to dog's body
+        dog_y = self.player.y - self.bounds.top + 100  # Lower on dog's body
+
+        # Check if dog is visible in arena (for player 2, dog walks in from right)
+        dog_visible = 0 <= dog_x <= self.bounds.width
 
         # Determine leash color based on state
         leash_state = self.player.get_leash_state()
@@ -235,6 +399,15 @@ class Arena:
         else:
             leash_color = (139, 90, 43)  # Brown rope normally
             rope_color = (101, 67, 33)
+
+        # Draw anchor ring on wall (always visible)
+        pygame.draw.circle(self.surface, (100, 100, 100), (anchor_x, anchor_y), 8)
+        pygame.draw.circle(self.surface, (150, 150, 150), (anchor_x, anchor_y), 6)
+        pygame.draw.circle(self.surface, (80, 80, 80), (anchor_x, anchor_y), 4)
+
+        # Only draw rope and collar when dog is visible
+        if not dog_visible:
+            return
 
         # Calculate leash length and sag
         dx = dog_x - anchor_x
@@ -264,11 +437,6 @@ class Arena:
             # Draw highlight
             highlight_points = [(p[0], p[1] - 1) for p in points]
             pygame.draw.lines(self.surface, rope_color, False, highlight_points, 2)
-
-        # Draw anchor ring on wall
-        pygame.draw.circle(self.surface, (100, 100, 100), (anchor_x, anchor_y), 8)
-        pygame.draw.circle(self.surface, (150, 150, 150), (anchor_x, anchor_y), 6)
-        pygame.draw.circle(self.surface, (80, 80, 80), (anchor_x, anchor_y), 4)
 
         # Draw collar on dog
         collar_x = int(dog_x)
@@ -349,85 +517,90 @@ class VotingMeter:
 
     def __init__(self, x: int, y: int, width: int, height: int):
         self.rect = pygame.Rect(x, y, width, height)
-        self.extend_color = (50, 200, 50)  # Green
-        self.yank_color = (200, 50, 50)  # Red
+        self.extend_color = (81, 180, 71)  # #51B447 Green
+        self.yank_color = (221, 68, 61)  # #DD443D Red
         self.bg_color = (40, 40, 60)
         self.border_color = (100, 100, 140)
 
     def render(self, surface: pygame.Surface, voting_system: 'VotingSystem',
-               font: pygame.font.Font, small_font: pygame.font.Font) -> None:
+               font: pygame.font.Font, small_font: pygame.font.Font,
+               label_font: pygame.font.Font = None) -> None:
         """Render the voting meter."""
-        # Background
-        pygame.draw.rect(surface, self.bg_color, self.rect, border_radius=8)
-        pygame.draw.rect(surface, self.border_color, self.rect, 2, border_radius=8)
+        # No background or border - transparent
+        # Use smaller font for labels, fallback to small_font
+        if label_font is None:
+            label_font = small_font
 
         counts = voting_system.get_vote_counts()
         extend_votes = counts.get("extend", 0)
         yank_votes = counts.get("yank", 0)
         total_votes = extend_votes + yank_votes
 
-        # Vote bars
-        bar_height = 20
-        bar_y = self.rect.y + 30
-        bar_margin = 20
-        bar_width = self.rect.width - bar_margin * 2
-
-        # Extend bar (green, left side)
-        extend_bar_rect = pygame.Rect(self.rect.x + bar_margin, bar_y, bar_width // 2 - 5, bar_height)
-        pygame.draw.rect(surface, (30, 60, 30), extend_bar_rect, border_radius=4)
-
-        # Yank bar (red, right side)
-        yank_bar_rect = pygame.Rect(self.rect.x + bar_margin + bar_width // 2 + 5, bar_y, bar_width // 2 - 5, bar_height)
-        pygame.draw.rect(surface, (60, 30, 30), yank_bar_rect, border_radius=4)
-
-        # Fill bars proportionally
-        if total_votes > 0:
-            extend_fill = int((extend_votes / max(extend_votes + yank_votes, 1)) * (bar_width // 2 - 10))
-            yank_fill = int((yank_votes / max(extend_votes + yank_votes, 1)) * (bar_width // 2 - 10))
-
-            if extend_fill > 0:
-                fill_rect = pygame.Rect(extend_bar_rect.x + 3, bar_y + 3, extend_fill, bar_height - 6)
-                pygame.draw.rect(surface, self.extend_color, fill_rect, border_radius=2)
-
-            if yank_fill > 0:
-                fill_rect = pygame.Rect(yank_bar_rect.x + 3, bar_y + 3, yank_fill, bar_height - 6)
-                pygame.draw.rect(surface, self.yank_color, fill_rect, border_radius=2)
-
-        # Labels and counts
-        label_y = self.rect.y + 12
-        text_surf = small_font.render("EXTEND", True, self.extend_color)
-        surface.blit(text_surf, (self.rect.x + bar_margin, label_y))
-
-        text_surf = small_font.render("YANK", True, self.yank_color)
-        text_rect = text_surf.get_rect(right=self.rect.right - bar_margin)
-        text_rect.y = label_y
-        surface.blit(text_surf, text_rect)
-
-        # Vote counts
-        count_y = bar_y + bar_height + 5
-        text_surf = small_font.render(str(extend_votes), True, (255, 255, 255))
-        surface.blit(text_surf, (extend_bar_rect.centerx - text_surf.get_width() // 2, count_y))
-
-        text_surf = small_font.render(str(yank_votes), True, (255, 255, 255))
-        surface.blit(text_surf, (yank_bar_rect.centerx - text_surf.get_width() // 2, count_y))
-
-        # Timer or status
-        status_y = self.rect.bottom - 25
+        # Timer or status at top (above the bars)
+        status_y = self.rect.y + 15
+        status_color = (77, 43, 31)  # #4D2B1F
         if voting_system.voting_active:
             timer_text = f"Voting: {int(voting_system.voting_timer)}s"
-            text_surf = small_font.render(timer_text, True, (200, 200, 100))
+            text_surf = small_font.render(timer_text, True, status_color)
         elif voting_system.cooldown_timer > 0:
             if voting_system.last_winner:
                 status_text = f"{voting_system.last_winner.upper()}! ({int(voting_system.cooldown_timer)}s)"
                 color = self.extend_color if voting_system.last_winner == "extend" else self.yank_color
             else:
                 status_text = f"TIE! ({int(voting_system.cooldown_timer)}s)"
-                color = (200, 200, 100)
+                color = status_color
             text_surf = small_font.render(status_text, True, color)
         else:
-            text_surf = small_font.render("Waiting...", True, (150, 150, 150))
+            text_surf = small_font.render("Waiting...", True, status_color)
 
-        surface.blit(text_surf, (self.rect.centerx - text_surf.get_width() // 2, status_y))
+        # Vote bars below status
+        bar_height = 20
+        bar_y = self.rect.y + 45
+        bar_margin = 20
+        bar_width = self.rect.width - bar_margin * 2
+
+        # Right-align status text to yank bar
+        status_x = self.rect.right - bar_margin - text_surf.get_width()
+        surface.blit(text_surf, (status_x, status_y))
+        stroke_color = (77, 43, 31)  # #4D2B1F
+
+        # Extend bar (green, left side) - settings style
+        extend_bar_rect = pygame.Rect(self.rect.x + bar_margin, bar_y, bar_width // 2 - 5, bar_height)
+        # Background (unfilled)
+        pygame.draw.rect(surface, (185, 231, 199), extend_bar_rect, border_radius=4)  # #B9E7C7
+        # Fill
+        if total_votes > 0 and extend_votes > 0:
+            fill_ratio = extend_votes / max(extend_votes + yank_votes, 1)
+            extend_fill_width = int(extend_bar_rect.width * fill_ratio)
+            if extend_fill_width > 0:
+                fill_rect = pygame.Rect(extend_bar_rect.x, bar_y, extend_fill_width, bar_height)
+                pygame.draw.rect(surface, (81, 180, 71), fill_rect, border_radius=4)  # #51B447
+        # Stroke
+        pygame.draw.rect(surface, stroke_color, extend_bar_rect, 2, border_radius=4)
+
+        # Yank bar (red, right side) - settings style
+        yank_bar_rect = pygame.Rect(self.rect.x + bar_margin + bar_width // 2 + 5, bar_y, bar_width // 2 - 5, bar_height)
+        # Background (unfilled)
+        pygame.draw.rect(surface, (186, 143, 145), yank_bar_rect, border_radius=4)  # #BA8F91
+        # Fill
+        if total_votes > 0 and yank_votes > 0:
+            fill_ratio = yank_votes / max(extend_votes + yank_votes, 1)
+            yank_fill_width = int(yank_bar_rect.width * fill_ratio)
+            if yank_fill_width > 0:
+                fill_rect = pygame.Rect(yank_bar_rect.x, bar_y, yank_fill_width, bar_height)
+                pygame.draw.rect(surface, (221, 68, 61), fill_rect, border_radius=4)  # #DD443D
+        # Stroke
+        pygame.draw.rect(surface, stroke_color, yank_bar_rect, 2, border_radius=4)
+
+        # Labels below bars (smaller font)
+        label_y = bar_y + bar_height + 5
+        # Extend label - left aligned to extend bar, color #51B447
+        text_surf = label_font.render("extend", True, (81, 180, 71))
+        surface.blit(text_surf, (extend_bar_rect.x, label_y))
+
+        # Yank label - right aligned to yank bar, color #DD443D
+        text_surf = label_font.render("yank", True, (221, 68, 61))
+        surface.blit(text_surf, (yank_bar_rect.right - text_surf.get_width(), label_y))
 
 
 class ChatMessage:
@@ -562,16 +735,6 @@ class ChatSimulator:
         surface.blit(text, (self.yank_btn.centerx - text.get_width() // 2,
                            self.yank_btn.centery - text.get_height() // 2))
 
-        # Auto button
-        self.auto_btn = pygame.Rect(self.rect.x + 10, btn_y + 40, self.rect.width - 20, btn_height)
-        auto_color = (100, 200, 100) if self.auto_vote else (100, 100, 100)
-        pygame.draw.rect(surface, (30, 30, 40), self.auto_btn, border_radius=5)
-        pygame.draw.rect(surface, auto_color, self.auto_btn, 2, border_radius=5)
-        auto_text = "AUTO: ON" if self.auto_vote else "AUTO: OFF"
-        text = small_font.render(auto_text, True, auto_color)
-        surface.blit(text, (self.auto_btn.centerx - text.get_width() // 2,
-                           self.auto_btn.centery - text.get_height() // 2))
-
         # Instructions
         instr_y = self.rect.bottom - 20
         instr = small_font.render("Click buttons to vote", True, (120, 120, 140))
@@ -639,13 +802,21 @@ class GameplayScreen(BaseScreen):
         self.background_image: Optional[pygame.Surface] = None
         self.logo_image: Optional[pygame.Surface] = None
         self.battlefield_image: Optional[pygame.Surface] = None
+        self.battlefield1_image: Optional[pygame.Surface] = None
+        self.battlefield2_image: Optional[pygame.Surface] = None
         self.menu_bar_image: Optional[pygame.Surface] = None
+        self.cloud1_image: Optional[pygame.Surface] = None
+        self.cloud2_image: Optional[pygame.Surface] = None
+        self.cloud1_x: float = 0.0  # Cloud 1 position (starts off-screen left)
+        self.cloud2_x: float = 0.0  # Cloud 2 position (starts off-screen right)
+        self.cloud_animation_done: bool = False
 
         # Custom font for score/timer
         self.daydream_font: Optional[pygame.font.Font] = None
         self.daydream_font_small: Optional[pygame.font.Font] = None
         self.daydream_font_smaller: Optional[pygame.font.Font] = None
         self.daydream_font_smallest: Optional[pygame.font.Font] = None
+        self.daydream_font_tiny: Optional[pygame.font.Font] = None
         self.daydream_font_countdown: Optional[pygame.font.Font] = None
 
         # Announcement system for dramatic effect reveals
@@ -663,6 +834,57 @@ class GameplayScreen(BaseScreen):
         self.point_popups = []  # List of {x, y, points, timer, stolen}
         self.popup_duration = 1.0  # seconds
         self.daydream_font_popup: Optional[pygame.font.Font] = None
+
+        # Walk-in animation state
+        self.walk_in_active = False
+        self.walk_in_duration = 3.5  # seconds for walk-in animation (slower)
+        self.walk_in_timer = 0.0
+        self.walk_in_frames: List[pygame.Surface] = []
+        self.walk_in_frame_index = 0
+        self.walk_in_frame_timer = 0.0
+        self.walk_in_frame_duration = 0.15  # Slower frame rate for walking
+        self.walk_in_jazzy_frame_duration = 0.125  # Jazzy is 1.2x faster
+        self.walk_in_prissy_frame_duration = 0.125  # Prissy is 1.2x faster
+        self.walk_in_p1_x = 0.0  # Player 1 walk-in x position
+        self.walk_in_p2_x = 0.0  # Player 2 walk-in x position
+        self.walk_in_p1_start_x = 0.0
+        self.walk_in_p1_end_x = 0.0
+        self.walk_in_p2_start_x = 0.0
+        self.walk_in_p2_end_x = 0.0
+        self.walk_in_p1_is_jazzy = False  # Track if player 1 is Jazzy
+        self.walk_in_p2_is_jazzy = False  # Track if player 2 is Jazzy
+        self.walk_in_p1_is_biggie = False  # Track if player 1 is Biggie
+        self.walk_in_p2_is_biggie = False  # Track if player 2 is Biggie
+        self.walk_in_biggie_frames: List[pygame.Surface] = []
+        self.walk_in_biggie_frame_index = 0
+        self.walk_in_biggie_frame_timer = 0.0
+        self.walk_in_p1_is_prissy = False  # Track if player 1 is Prissy
+        self.walk_in_p2_is_prissy = False  # Track if player 2 is Prissy
+        self.walk_in_prissy_frames: List[pygame.Surface] = []
+        self.walk_in_prissy_frame_index = 0
+        self.walk_in_prissy_frame_timer = 0.0
+        self.walk_in_p1_is_rex = False  # Track if player 1 is Rex
+        self.walk_in_p2_is_rex = False  # Track if player 2 is Rex
+        self.walk_in_rex_frames: List[pygame.Surface] = []
+        self.walk_in_rex_frame_index = 0
+        self.walk_in_rex_frame_timer = 0.0
+        self.walk_in_p1_is_dash = False  # Track if player 1 is Dash
+        self.walk_in_p2_is_dash = False  # Track if player 2 is Dash
+        self.walk_in_dash_frames: List[pygame.Surface] = []
+        self.walk_in_dash_frame_index = 0
+        self.walk_in_dash_frame_timer = 0.0
+        self.walk_in_p1_is_snowy = False  # Track if player 1 is Snowy
+        self.walk_in_p2_is_snowy = False  # Track if player 2 is Snowy
+        self.walk_in_snowy_frames: List[pygame.Surface] = []
+        self.walk_in_snowy_frame_index = 0
+        self.walk_in_snowy_frame_timer = 0.0
+        # Left-facing frames for player 2 (walks from right side)
+        self.walk_in_frames_left: List[pygame.Surface] = []
+        self.walk_in_biggie_frames_left: List[pygame.Surface] = []
+        self.walk_in_prissy_frames_left: List[pygame.Surface] = []
+        self.walk_in_rex_frames_left: List[pygame.Surface] = []
+        self.walk_in_dash_frames_left: List[pygame.Surface] = []
+        self.walk_in_snowy_frames_left: List[pygame.Surface] = []
 
     def on_enter(self, data: Dict[str, Any] = None) -> None:
         """Initialize gameplay."""
@@ -710,6 +932,7 @@ class GameplayScreen(BaseScreen):
             self.daydream_font_small = pygame.font.Font(font_path, 20)  # For player name
             self.daydream_font_smaller = pygame.font.Font(font_path, 16)  # For "score"
             self.daydream_font_smallest = pygame.font.Font(font_path, 14)  # For score number
+            self.daydream_font_tiny = pygame.font.Font(font_path, 11)  # For voting labels
             self.daydream_font_countdown = pygame.font.Font(font_path, 120)  # For countdown
             self.daydream_font_popup = pygame.font.Font(font_path, 24)  # For point popups
 
@@ -718,7 +941,7 @@ class GameplayScreen(BaseScreen):
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         ui_dir = os.path.join(base_dir, "ui")
 
-        bg_path = os.path.join(ui_dir, "battle screen background.png")
+        bg_path = os.path.join(ui_dir, "Battle screen background.png")
         if os.path.exists(bg_path):
             self.background_image = pygame.image.load(bg_path).convert()
             self.background_image = pygame.transform.scale(
@@ -729,18 +952,25 @@ class GameplayScreen(BaseScreen):
         logo_path = os.path.join(ui_dir, "jazzy logo sml.png")
         if os.path.exists(logo_path):
             self.logo_image = pygame.image.load(logo_path).convert_alpha()
-            # Scale to 80% of original size
-            new_width = int(self.logo_image.get_width() * 0.8)
-            new_height = int(self.logo_image.get_height() * 0.8)
+            # Scale to 52.8% of original size (0.44 * 1.2)
+            new_width = int(self.logo_image.get_width() * 0.528)
+            new_height = int(self.logo_image.get_height() * 0.528)
             self.logo_image = pygame.transform.scale(self.logo_image, (new_width, new_height))
 
-        # Load battlefield image
+        # Load battlefield images for each player
+        battlefield1_path = os.path.join(ui_dir, "Battle field 1.png")
+        battlefield2_path = os.path.join(ui_dir, "Battle field 2.png")
+        if os.path.exists(battlefield1_path):
+            self.battlefield1_image = pygame.image.load(battlefield1_path).convert_alpha()
+        if os.path.exists(battlefield2_path):
+            self.battlefield2_image = pygame.image.load(battlefield2_path).convert_alpha()
+        # Fallback to old single battlefield image
         battlefield_path = os.path.join(ui_dir, "battle field.png")
         if os.path.exists(battlefield_path):
             self.battlefield_image = pygame.image.load(battlefield_path).convert_alpha()
 
-        # Load menu bar image
-        menu_bar_path = os.path.join(ui_dir, "Menu bar.png")
+        # Load menu bar image (yellow version for gameplay screen)
+        menu_bar_path = os.path.join(ui_dir, "Menu bar yellow.png")
         if os.path.exists(menu_bar_path):
             self.menu_bar_image = pygame.image.load(menu_bar_path).convert_alpha()
             # Scale to 65.3% of original size (0.6875 * 0.95)
@@ -748,15 +978,31 @@ class GameplayScreen(BaseScreen):
             new_height = int(self.menu_bar_image.get_height() * 0.653)
             self.menu_bar_image = pygame.transform.scale(self.menu_bar_image, (new_width, new_height))
 
+        # Load cloud images
+        cloud1_path = os.path.join(ui_dir, "Cloud 1.png")
+        cloud2_path = os.path.join(ui_dir, "Cloud 2.png")
+        if os.path.exists(cloud1_path):
+            self.cloud1_image = pygame.image.load(cloud1_path).convert_alpha()
+            # Scale to 50% of original size
+            new_width = int(self.cloud1_image.get_width() * 0.5)
+            new_height = int(self.cloud1_image.get_height() * 0.5)
+            self.cloud1_image = pygame.transform.scale(self.cloud1_image, (new_width, new_height))
+        if os.path.exists(cloud2_path):
+            self.cloud2_image = pygame.image.load(cloud2_path).convert_alpha()
+            # Scale to 50% of original size
+            new_width = int(self.cloud2_image.get_width() * 0.5)
+            new_height = int(self.cloud2_image.get_height() * 0.5)
+            self.cloud2_image = pygame.transform.scale(self.cloud2_image, (new_width, new_height))
+
     def _setup_arenas(self, p1_char: Dict, p2_char: Dict) -> None:
         """Set up the game arenas and players."""
         # Arena dimensions for game area (split-screen, not including chat panel)
-        gap = 16
+        gap = -30  # Negative gap to overlap and bring battlefields closer
         arena_width = (self.game_area_width - gap) // 2
         arena_height = self.screen_height - 140  # Leave room for header and HUD
 
         # Calculate positions
-        arena_y = 65  # Below header
+        arena_y = 130  # Below header
 
         # Create arena bounds
         arena1_bounds = pygame.Rect(0, arena_y, arena_width, arena_height)
@@ -780,12 +1026,14 @@ class GameplayScreen(BaseScreen):
         else:
             self.player2 = Player(p2_char, arena2_bounds, player_num=2, horizontal_only=True)
 
-        # Create arenas with battlefield image
-        self.arena1 = Arena(arena1_bounds, self.player1, level_config, self.battlefield_image)
-        self.arena2 = Arena(arena2_bounds, self.player2, level_config, self.battlefield_image)
+        # Create arenas with battlefield images (use player-specific or fallback to shared)
+        arena1_bg = self.battlefield1_image if self.battlefield1_image else self.battlefield_image
+        arena2_bg = self.battlefield2_image if self.battlefield2_image else self.battlefield_image
+        self.arena1 = Arena(arena1_bounds, self.player1, level_config, arena1_bg)
+        self.arena2 = Arena(arena2_bounds, self.player2, level_config, arena2_bg)
 
-        # Position players at ground level (offset for larger sprites)
-        ground_offset = 160
+        # Position players at ground level (offset for larger sprites - 216px now)
+        ground_offset = 230
         self.player1.y = arena1_bounds.bottom - ground_offset
         self.player2.y = arena2_bounds.bottom - ground_offset
 
@@ -794,11 +1042,11 @@ class GameplayScreen(BaseScreen):
         # Initialize voting system
         self.voting_system = VotingSystem()
 
-        # Voting meter at top center of game area
+        # Voting meter on right side, above menu bar
         meter_width = 300
         meter_height = 85
-        meter_x = (self.game_area_width - meter_width) // 2
-        meter_y = 58  # Just below header
+        meter_x = self.game_area_width - meter_width - 30  # Right side with margin
+        meter_y = 105  # Above menu bar (menu bar is at y=200)
         self.voting_meter = VotingMeter(meter_x, meter_y, meter_width, meter_height)
 
         # Chat simulator panel on right side of screen
@@ -857,8 +1105,288 @@ class GameplayScreen(BaseScreen):
         self.countdown = 3
         self.countdown_timer = 1.0
         self.round_active = False
+        self.walk_in_active = False
+
+        # Initialize cloud positions (off-screen)
+        if self.cloud1_image:
+            self.cloud1_x = -self.cloud1_image.get_width()  # Start off-screen left
+        if self.cloud2_image:
+            self.cloud2_x = self.game_area_width  # Start off-screen right
+        self.cloud_animation_done = False
+
+        # Check if players are Jazzy, Biggie, Prissy, Rex, or Dash (for walk-in animation)
+        p1_is_jazzy = self.player1 and self.player1.character_id == 'jazzy'
+        p2_is_jazzy = self.player2 and self.player2.character_id == 'jazzy'
+        p1_is_biggie = self.player1 and self.player1.character_id == 'biggie'
+        p2_is_biggie = self.player2 and self.player2.character_id == 'biggie'
+        p1_is_prissy = self.player1 and self.player1.character_id == 'prissy'
+        p2_is_prissy = self.player2 and self.player2.character_id == 'prissy'
+        p1_is_rex = self.player1 and self.player1.character_id == 'rex'
+        p2_is_rex = self.player2 and self.player2.character_id == 'rex'
+        p1_is_dash = self.player1 and self.player1.character_id == 'dash'
+        p2_is_dash = self.player2 and self.player2.character_id == 'dash'
+        p1_is_snowy = self.player1 and self.player1.character_id == 'snowy'
+        p2_is_snowy = self.player2 and self.player2.character_id == 'snowy'
+
+        # Position dogs with walk-in animations off-screen during countdown (they'll walk in after)
+        # Other players stay at their normal center positions
+        if self.player1:
+            if p1_is_jazzy or p1_is_biggie or p1_is_prissy or p1_is_rex or p1_is_dash or p1_is_snowy:
+                self.player1.x = -1000
+            else:
+                self.player1.x = self.arena1.bounds.centerx - self.player1.width // 2
+        if self.player2:
+            if p2_is_jazzy or p2_is_biggie or p2_is_prissy or p2_is_rex or p2_is_dash or p2_is_snowy:
+                self.player2.x = -1000
+            else:
+                self.player2.x = self.arena2.bounds.centerx - self.player2.width // 2
+
         # Play countdown sound for "3" (uses 2&3 sound)
         self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "countdown_2_3"})
+
+    def _start_walk_in(self) -> None:
+        """Start the walk-in animation after countdown (for Jazzy and Biggie)."""
+        from ..sprites.sprite_sheet_loader import SpriteSheetLoader
+
+        self.walk_in_active = True
+        self.walk_in_timer = self.walk_in_duration
+        self.walk_in_frame_index = 0
+        self.walk_in_frame_timer = 0.0
+        self.walk_in_biggie_frame_index = 0
+        self.walk_in_biggie_frame_timer = 0.0
+        self.walk_in_prissy_frame_index = 0
+        self.walk_in_prissy_frame_timer = 0.0
+
+        # Check if either player is Jazzy, Biggie, Prissy, Rex, or Dash
+        self.walk_in_p1_is_jazzy = self.player1 and self.player1.character_id == 'jazzy'
+        self.walk_in_p2_is_jazzy = self.player2 and self.player2.character_id == 'jazzy'
+        self.walk_in_p1_is_biggie = self.player1 and self.player1.character_id == 'biggie'
+        self.walk_in_p2_is_biggie = self.player2 and self.player2.character_id == 'biggie'
+        self.walk_in_p1_is_prissy = self.player1 and self.player1.character_id == 'prissy'
+        self.walk_in_p2_is_prissy = self.player2 and self.player2.character_id == 'prissy'
+        self.walk_in_p1_is_rex = self.player1 and self.player1.character_id == 'rex'
+        self.walk_in_p2_is_rex = self.player2 and self.player2.character_id == 'rex'
+        self.walk_in_p1_is_dash = self.player1 and self.player1.character_id == 'dash'
+        self.walk_in_p2_is_dash = self.player2 and self.player2.character_id == 'dash'
+        self.walk_in_p1_is_snowy = self.player1 and self.player1.character_id == 'snowy'
+        self.walk_in_p2_is_snowy = self.player2 and self.player2.character_id == 'snowy'
+
+        loader = SpriteSheetLoader()
+
+        # Load Jazzy walking frames if at least one player is Jazzy
+        # Size: 121x113 * 0.95 = 115x107
+        if self.walk_in_p1_is_jazzy:
+            self.walk_in_frames = loader.get_walking_frames('jazzy', facing_right=True, target_size=(115, 107))
+        else:
+            self.walk_in_frames = []
+        if self.walk_in_p2_is_jazzy:
+            self.walk_in_frames_left = loader.get_walking_frames('jazzy', facing_right=False, target_size=(115, 107))
+        else:
+            self.walk_in_frames_left = []
+
+        # Load Biggie walking frames if at least one player is Biggie
+        # Size: 156x113 * 0.95 = 148x107
+        if self.walk_in_p1_is_biggie:
+            self.walk_in_biggie_frames = loader.get_walking_frames('biggie', facing_right=True, target_size=(145, 105))
+        else:
+            self.walk_in_biggie_frames = []
+        if self.walk_in_p2_is_biggie:
+            self.walk_in_biggie_frames_left = loader.get_walking_frames('biggie', facing_right=False, target_size=(145, 105))
+        else:
+            self.walk_in_biggie_frames_left = []
+
+        # Load Prissy walking frames if at least one player is Prissy
+        # Prissy frame size is 200x250 (3x2 grid), at height 107 = 85x107, then 1.1x = 94x118
+        if self.walk_in_p1_is_prissy:
+            self.walk_in_prissy_frames = loader.get_walking_frames('prissy', facing_right=True, target_size=(94, 118))
+        else:
+            self.walk_in_prissy_frames = []
+        if self.walk_in_p2_is_prissy:
+            self.walk_in_prissy_frames_left = loader.get_walking_frames('prissy', facing_right=False, target_size=(94, 118))
+        else:
+            self.walk_in_prissy_frames_left = []
+
+        # Load Rex walking frames if at least one player is Rex
+        # Rex frame size is 274x211 (6x6 grid), at height 107 = 139x107, then 0.95x = 131x101
+        self.walk_in_rex_frame_index = 0
+        self.walk_in_rex_frame_timer = 0.0
+        if self.walk_in_p1_is_rex:
+            self.walk_in_rex_frames = loader.get_walking_frames('rex', facing_right=True, target_size=(131, 101))
+        else:
+            self.walk_in_rex_frames = []
+        if self.walk_in_p2_is_rex:
+            self.walk_in_rex_frames_left = loader.get_walking_frames('rex', facing_right=False, target_size=(131, 101))
+        else:
+            self.walk_in_rex_frames_left = []
+
+        # Load Dash walking frames if at least one player is Dash
+        # Dash frame size is 286x168 (5 horizontal frames), at height 107 = 182x107, then 0.95x * 0.81 = 140x82
+        self.walk_in_dash_frame_index = 0
+        self.walk_in_dash_frame_timer = 0.0
+        if self.walk_in_p1_is_dash:
+            self.walk_in_dash_frames = loader.get_walking_frames('dash', facing_right=True, target_size=(140, 82))
+        else:
+            self.walk_in_dash_frames = []
+        if self.walk_in_p2_is_dash:
+            self.walk_in_dash_frames_left = loader.get_walking_frames('dash', facing_right=False, target_size=(140, 82))
+        else:
+            self.walk_in_dash_frames_left = []
+
+        # Load Snowy walking frames if at least one player is Snowy
+        # Snowy frame size is 270x244 (6x6 grid), at height 107 = 118x107, then 0.95x = 112x101
+        self.walk_in_snowy_frame_index = 0
+        self.walk_in_snowy_frame_timer = 0.0
+        if self.walk_in_p1_is_snowy:
+            self.walk_in_snowy_frames = loader.get_walking_frames('snowy', facing_right=True, target_size=(112, 101))
+        else:
+            self.walk_in_snowy_frames = []
+        if self.walk_in_p2_is_snowy:
+            self.walk_in_snowy_frames_left = loader.get_walking_frames('snowy', facing_right=False, target_size=(112, 101))
+        else:
+            self.walk_in_snowy_frames_left = []
+
+        # Set up walk-in positions for player 1 (walks from left to center)
+        if self.arena1:
+            self.walk_in_p1_start_x = self.arena1.bounds.left - self.player1.width
+            self.walk_in_p1_end_x = self.arena1.bounds.centerx - self.player1.width // 2
+            self.walk_in_p1_x = self.walk_in_p1_start_x
+
+        # Set up walk-in positions for player 2 (walks from right to center of their arena)
+        if self.arena2:
+            self.walk_in_p2_start_x = self.arena2.bounds.right
+            self.walk_in_p2_end_x = self.arena2.bounds.centerx - self.player2.width // 2
+            self.walk_in_p2_x = self.walk_in_p2_start_x
+
+        # Position players at the ground level but off-screen to the left
+        ground_offset = 230
+        if self.arena1:
+            self.player1.y = self.arena1.bounds.bottom - ground_offset
+        if self.arena2:
+            self.player2.y = self.arena2.bounds.bottom - ground_offset
+
+    def _update_walk_in(self, dt: float) -> None:
+        """Update the walk-in animation."""
+        self.walk_in_timer -= dt
+
+        # Update Jazzy animation frame (use either right or left frames for count)
+        self.walk_in_frame_timer += dt
+        if self.walk_in_frame_timer >= self.walk_in_jazzy_frame_duration:
+            self.walk_in_frame_timer -= self.walk_in_jazzy_frame_duration
+            jazzy_frames = self.walk_in_frames if self.walk_in_frames else self.walk_in_frames_left
+            if jazzy_frames:
+                self.walk_in_frame_index = (self.walk_in_frame_index + 1) % len(jazzy_frames)
+
+        # Update Biggie animation frame (use either right or left frames for count)
+        self.walk_in_biggie_frame_timer += dt
+        if self.walk_in_biggie_frame_timer >= self.walk_in_frame_duration:
+            self.walk_in_biggie_frame_timer -= self.walk_in_frame_duration
+            biggie_frames = self.walk_in_biggie_frames if self.walk_in_biggie_frames else self.walk_in_biggie_frames_left
+            if biggie_frames:
+                self.walk_in_biggie_frame_index = (self.walk_in_biggie_frame_index + 1) % len(biggie_frames)
+
+        # Update Prissy animation frame (use either right or left frames for count)
+        self.walk_in_prissy_frame_timer += dt
+        if self.walk_in_prissy_frame_timer >= self.walk_in_prissy_frame_duration:
+            self.walk_in_prissy_frame_timer -= self.walk_in_prissy_frame_duration
+            prissy_frames = self.walk_in_prissy_frames if self.walk_in_prissy_frames else self.walk_in_prissy_frames_left
+            if prissy_frames:
+                self.walk_in_prissy_frame_index = (self.walk_in_prissy_frame_index + 1) % len(prissy_frames)
+
+        # Update Rex animation frame (use either right or left frames for count)
+        self.walk_in_rex_frame_timer += dt
+        if self.walk_in_rex_frame_timer >= self.walk_in_frame_duration:
+            self.walk_in_rex_frame_timer -= self.walk_in_frame_duration
+            rex_frames = self.walk_in_rex_frames if self.walk_in_rex_frames else self.walk_in_rex_frames_left
+            if rex_frames:
+                self.walk_in_rex_frame_index = (self.walk_in_rex_frame_index + 1) % len(rex_frames)
+
+        # Update Dash animation frame (use either right or left frames for count)
+        self.walk_in_dash_frame_timer += dt
+        if self.walk_in_dash_frame_timer >= self.walk_in_frame_duration:
+            self.walk_in_dash_frame_timer -= self.walk_in_frame_duration
+            dash_frames = self.walk_in_dash_frames if self.walk_in_dash_frames else self.walk_in_dash_frames_left
+            if dash_frames:
+                self.walk_in_dash_frame_index = (self.walk_in_dash_frame_index + 1) % len(dash_frames)
+
+        # Update Snowy animation frame (use either right or left frames for count)
+        self.walk_in_snowy_frame_timer += dt
+        if self.walk_in_snowy_frame_timer >= self.walk_in_frame_duration:
+            self.walk_in_snowy_frame_timer -= self.walk_in_frame_duration
+            snowy_frames = self.walk_in_snowy_frames if self.walk_in_snowy_frames else self.walk_in_snowy_frames_left
+            if snowy_frames:
+                self.walk_in_snowy_frame_index = (self.walk_in_snowy_frame_index + 1) % len(snowy_frames)
+
+        # Calculate progress (0 to 1)
+        progress = 1.0 - (self.walk_in_timer / self.walk_in_duration)
+        progress = min(1.0, max(0.0, progress))
+
+        # Use easing for smoother animation (ease-out)
+        eased_progress = 1.0 - (1.0 - progress) ** 2
+
+        # Update walk-in positions (for rendering)
+        self.walk_in_p1_x = self.walk_in_p1_start_x + (self.walk_in_p1_end_x - self.walk_in_p1_start_x) * eased_progress
+        self.walk_in_p2_x = self.walk_in_p2_start_x + (self.walk_in_p2_end_x - self.walk_in_p2_start_x) * eased_progress
+
+        # Hide players that have walk-in animations (Jazzy, Biggie, Prissy, Rex, Dash)
+        # They're rendered via walk-in animation sprite instead
+        if self.player1:
+            if self.walk_in_p1_is_jazzy or self.walk_in_p1_is_biggie or self.walk_in_p1_is_prissy or self.walk_in_p1_is_rex or self.walk_in_p1_is_dash or self.walk_in_p1_is_snowy:
+                self.player1.x = -1000  # Hide, we render walk-in sprite instead
+            else:
+                self.player1.x = self.walk_in_p1_end_x  # Show at final position
+
+        if self.player2:
+            if self.walk_in_p2_is_jazzy or self.walk_in_p2_is_biggie or self.walk_in_p2_is_prissy or self.walk_in_p2_is_rex or self.walk_in_p2_is_dash or self.walk_in_p2_is_snowy:
+                self.player2.x = -1000  # Hide, we render walk-in sprite instead
+            else:
+                self.player2.x = self.walk_in_p2_end_x  # Show at final position
+
+        # Check if walk-in is complete
+        if self.walk_in_timer <= 0:
+            self.walk_in_active = False
+            # Position all players at their final positions
+            if self.player1:
+                self.player1.x = self.walk_in_p1_end_x
+            if self.player2:
+                self.player2.x = self.walk_in_p2_end_x
+            self._start_round()
+
+    def _update_clouds(self, dt: float) -> None:
+        """Update cloud animation - clouds move in from sides."""
+        cloud_speed = 150  # pixels per second
+
+        # Calculate target positions (above menu bar, on each player's side)
+        menu_bar_y = 200
+        cloud_y = menu_bar_y - 60  # Above menu bar
+
+        # Cloud 1 target: left side of player 1's area
+        if self.cloud1_image:
+            cloud1_target_x = self.game_area_width // 4 - self.cloud1_image.get_width() // 2
+            if self.cloud1_x < cloud1_target_x:
+                self.cloud1_x += cloud_speed * dt
+                if self.cloud1_x >= cloud1_target_x:
+                    self.cloud1_x = cloud1_target_x
+
+        # Cloud 2 target: right side of player 2's area
+        if self.cloud2_image:
+            cloud2_target_x = (self.game_area_width * 3) // 4 - self.cloud2_image.get_width() // 2
+            if self.cloud2_x > cloud2_target_x:
+                self.cloud2_x -= cloud_speed * dt
+                if self.cloud2_x <= cloud2_target_x:
+                    self.cloud2_x = cloud2_target_x
+
+        # Update arena cloud spawn positions (center of each cloud)
+        if self.cloud1_image and self.arena1:
+            self.arena1.cloud_spawn_x = self.cloud1_x + self.cloud1_image.get_width() // 2
+        if self.cloud2_image and self.arena2:
+            self.arena2.cloud_spawn_x = self.cloud2_x + self.cloud2_image.get_width() // 2
+
+        # Check if both clouds have reached their targets
+        if self.cloud1_image and self.cloud2_image:
+            cloud1_target_x = self.game_area_width // 4 - self.cloud1_image.get_width() // 2
+            cloud2_target_x = (self.game_area_width * 3) // 4 - self.cloud2_image.get_width() // 2
+            if self.cloud1_x >= cloud1_target_x and self.cloud2_x <= cloud2_target_x:
+                self.cloud_animation_done = True
 
     def _start_round(self) -> None:
         """Start the actual round."""
@@ -868,9 +1396,12 @@ class GameplayScreen(BaseScreen):
         self.player2.reset()
         self.arena1.snacks.clear()
         self.arena2.snacks.clear()
+        # Reset thunder sound flag for new round
+        self.arena1.thunder_played_this_round = False
+        self.arena2.thunder_played_this_round = False
 
         # Reset player positions to ground
-        ground_offset = 160
+        ground_offset = 230
         self.player1.y = self.arena1.bounds.bottom - ground_offset
         self.player2.y = self.arena2.bounds.bottom - ground_offset
 
@@ -1018,6 +1549,10 @@ class GameplayScreen(BaseScreen):
         if self.paused:
             return
 
+        # Update cloud animation (clouds move in during countdown/walk-in)
+        if not self.cloud_animation_done:
+            self._update_clouds(dt)
+
         # Update countdown
         if self.countdown > 0:
             self.countdown_timer -= dt
@@ -1025,13 +1560,19 @@ class GameplayScreen(BaseScreen):
                 self.countdown -= 1
                 self.countdown_timer = 1.0
                 if self.countdown == 0:
-                    self._start_round()
+                    # Start walk-in animation instead of immediately starting round
+                    self._start_walk_in()
                 elif self.countdown == 2:
                     # Play countdown sound for "2" (uses 2&3 sound)
                     self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "countdown_2_3"})
                 elif self.countdown == 1:
                     # Play countdown sound for "1"
                     self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "countdown_1"})
+            return
+
+        # Update walk-in animation
+        if self.walk_in_active:
+            self._update_walk_in(dt)
             return
 
         if not self.round_active:
@@ -1168,16 +1709,22 @@ class GameplayScreen(BaseScreen):
         # Apply effect if any
         effect = result.get("effect")
         if effect:
-            player.apply_effect(
-                effect["type"],
-                effect["magnitude"],
-                effect["duration_seconds"]
-            )
+            # Check if this is a negative effect and player is invincible
+            negative_effects = ["slow", "chaos"]
+            if player.is_invincible and effect["type"] in negative_effects:
+                # Player is invincible - skip negative effect
+                pass
+            else:
+                player.apply_effect(
+                    effect["type"],
+                    effect["magnitude"],
+                    effect["duration_seconds"]
+                )
 
-            # Trigger chaos screen shake
-            if effect["type"] == "chaos":
-                self.shake_intensity = 5
-                self.shake_duration = effect["duration_seconds"]
+                # Trigger chaos screen shake
+                if effect["type"] == "chaos":
+                    self.shake_intensity = 5
+                    self.shake_duration = effect["duration_seconds"]
 
     def _apply_vote_effect(self, vote_type: str) -> None:
         """Apply the winning vote effect to both players."""
@@ -1225,7 +1772,7 @@ class GameplayScreen(BaseScreen):
         if self.logo_image:
             logo_rect = self.logo_image.get_rect()
             logo_x = (self.game_area_width - logo_rect.width) // 2
-            logo_y = 5
+            logo_y = -15  # Moved upward
             surface.blit(self.logo_image, (logo_x, logo_y))
 
         # Apply screen shake offset
@@ -1235,19 +1782,14 @@ class GameplayScreen(BaseScreen):
             shake_x = random.randint(-int(self.shake_intensity), int(self.shake_intensity))
             shake_y = random.randint(-int(self.shake_intensity), int(self.shake_intensity))
 
-        # Draw menu bar above battlefield
-        if self.menu_bar_image and self.arena1:
-            menu_bar_rect = self.menu_bar_image.get_rect()
-            # Position close to battlefield (battlefield starts at 35% from top of arena)
-            battlefield_top_y = self.arena1.bounds.y + int(self.arena1.bounds.height * 0.35)
-            menu_bar_x = (self.game_area_width - menu_bar_rect.width) // 2
-            menu_bar_y = battlefield_top_y - menu_bar_rect.height + 20
-            surface.blit(self.menu_bar_image, (menu_bar_x, menu_bar_y))
+        # Draw clouds above menu bar
+        cloud_y = 140  # Above menu bar
+        if self.cloud1_image:
+            surface.blit(self.cloud1_image, (int(self.cloud1_x), cloud_y))
+        if self.cloud2_image:
+            surface.blit(self.cloud2_image, (int(self.cloud2_x), cloud_y))
 
-        # Draw header (scores and round info) on top of menu bar
-        self._render_header(surface)
-
-        # Draw arenas
+        # Draw arenas (food layer)
         if self.arena1 and self.arena2:
             arena1_surface = self.arena1.render()
             arena2_surface = self.arena2.render()
@@ -1257,21 +1799,32 @@ class GameplayScreen(BaseScreen):
             surface.blit(arena2_surface,
                          (self.arena2.bounds.x + shake_x, self.arena2.bounds.y + shake_y))
 
-            # Render players who have crossed into the other arena (on top of everything)
+        # Draw menu bar above food layer
+        if self.menu_bar_image and self.arena1:
+            menu_bar_rect = self.menu_bar_image.get_rect()
+            # Position above the battlefield
+            menu_bar_x = (self.game_area_width - menu_bar_rect.width) // 2
+            menu_bar_y = 200  # Position above battlefield
+            surface.blit(self.menu_bar_image, (menu_bar_x, menu_bar_y))
+
+        # Draw header (scores and round info) on top of menu bar
+        self._render_header(surface)
+
+        # Render players who have crossed into the other arena (on top of everything)
+        if self.arena1 and self.arena2:
             self._render_crossed_players(surface, shake_x, shake_y)
 
         # Draw point popups
         self._render_point_popups(surface, shake_x, shake_y)
 
-        # Draw player HUDs below arenas
-        if self.player1 and self.player2:
-            self._render_player_hud(surface, self.player1, self.arena1.bounds, "P1")
-            p2_label = "AI" if self.vs_ai else "P2"
-            self._render_player_hud(surface, self.player2, self.arena2.bounds, p2_label)
+        # Player HUDs below arenas removed per user request
 
         # Draw voting meter (overlays top of arenas)
         if self.voting_meter and self.voting_system:
-            self.voting_meter.render(surface, self.voting_system, self.menu_font, self.small_font)
+            voting_font = self.daydream_font if self.daydream_font else self.menu_font
+            voting_small_font = self.daydream_font_small if self.daydream_font_small else self.small_font
+            voting_label_font = self.daydream_font_tiny if self.daydream_font_tiny else self.small_font
+            self.voting_meter.render(surface, self.voting_system, voting_font, voting_small_font, voting_label_font)
 
         # Draw chat simulator panel on right
         if self.chat_simulator:
@@ -1295,50 +1848,48 @@ class GameplayScreen(BaseScreen):
         if self.countdown > 0:
             self._render_countdown(surface)
 
+        # Draw walk-in animation
+        if self.walk_in_active:
+            self._render_walk_in(surface)
+
         # Draw pause overlay
         if self.paused:
             self._render_pause(surface)
 
     def _render_header(self, surface: pygame.Surface) -> None:
         """Render the game header (score and round info on menu bar)."""
-        # Calculate position on menu bar
-        if self.arena1 and self.menu_bar_image:
-            battlefield_top_y = self.arena1.bounds.y + int(self.arena1.bounds.height * 0.35)
-            menu_bar_y = battlefield_top_y - self.menu_bar_image.get_height() + 20
+        # Calculate position on menu bar (above battlefield)
+        menu_bar_y = 200  # Position above battlefield
+        if self.menu_bar_image:
             # Position text centered vertically on menu bar
             info_y = menu_bar_y + self.menu_bar_image.get_height() // 2
-        elif self.arena1:
-            info_y = self.arena1.bounds.y + int(self.arena1.bounds.height * 0.35) - 30
         else:
-            info_y = 280
+            info_y = 80
 
         # Colors
         score_color = (147, 76, 48)  # #934C30 for player scores
         vs_color = (77, 43, 31)  # #4D2B1F for round wins
-        timer_color = (232, 136, 55)  # #E88837 for timer and round
+        timer_color = (77, 43, 31)  # #4D2B1F for timer and round
         font = self.daydream_font if self.daydream_font else self.menu_font
 
         # Calculate position above menu bar for timer and round
-        if self.arena1 and self.menu_bar_image:
-            battlefield_top_y = self.arena1.bounds.y + int(self.arena1.bounds.height * 0.35)
-            menu_bar_y = battlefield_top_y - self.menu_bar_image.get_height() + 20
-            above_menu_y = menu_bar_y - 25
-        else:
-            above_menu_y = info_y - 40
+        above_menu_y = menu_bar_y - 10
 
         # Smaller font for timer and round
         small_font = self.daydream_font_small if self.daydream_font_small else font
 
-        # Timer on right side (above menu bar)
+        # Round number on left side (above menu bar)
+        round_text = f"round {self.current_round}"
+        left_x = 70  # Left aligned position
+        round_y = above_menu_y - 60  # Moved upward more
+        self.draw_text(surface, round_text, small_font, timer_color,
+                       (left_x, round_y), center=False)
+
+        # Timer on left side, below round number (left aligned to match round)
         if self.round_active:
             timer_text = f"{int(self.round_timer)}s"
             self.draw_text(surface, timer_text, small_font, timer_color,
-                           (self.game_area_width - 100, above_menu_y))
-
-        # Round number on left side (above menu bar)
-        round_text = f"round {self.current_round}"
-        self.draw_text(surface, round_text, small_font, timer_color,
-                       (130, above_menu_y))
+                           (left_x, round_y + 35), center=False)
 
         # Round wins display centered "# vs #" with smaller "vs"
         vs_font = self.daydream_font_smallest if self.daydream_font_smallest else font
@@ -1457,7 +2008,7 @@ class GameplayScreen(BaseScreen):
 
     def _render_point_popups(self, surface: pygame.Surface, shake_x: int, shake_y: int) -> None:
         """Render floating point popups when treats are collected."""
-        popup_font = self.daydream_font_popup if self.daydream_font_popup else pygame.font.Font(None, 24)
+        popup_font = self.daydream_font_popup if self.daydream_font_popup else pygame.font.Font(None, 32)
         popup_color = (81, 180, 71)  # #51B447
         outline_color = (255, 255, 255)  # White outline
 
@@ -1470,31 +2021,20 @@ class GameplayScreen(BaseScreen):
             # Use red for negative points, green for positive
             color = popup_color if points >= 0 else (222, 97, 91)  # #DE615B for negative
 
-            # Calculate alpha based on remaining time (fade out)
-            alpha = min(255, int(255 * (popup["timer"] / self.popup_duration)))
-
-            # Render text with white outline (draw outline first, then main text)
-            # Draw outline by rendering text offset in 4 directions
-            for dx, dy in [(-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, -1), (-1, 1), (1, 1)]:
+            # Draw white outline by rendering text offset in multiple directions (thicker)
+            for dx, dy in [(-2, 0), (2, 0), (0, -2), (0, 2), (-2, -2), (2, -2), (-2, 2), (2, 2),
+                           (-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)]:
                 outline_surface = popup_font.render(text, True, outline_color)
-                outline_surface.set_alpha(alpha)
                 outline_rect = outline_surface.get_rect(center=(x + dx, y + dy))
                 surface.blit(outline_surface, outline_rect)
 
-            # Draw main text
+            # Draw main text on top
             text_surface = popup_font.render(text, True, color)
-            text_surface.set_alpha(alpha)
             text_rect = text_surface.get_rect(center=(x, y))
             surface.blit(text_surface, text_rect)
 
     def _render_countdown(self, surface: pygame.Surface) -> None:
         """Render the countdown overlay."""
-        # Semi-transparent overlay (only over game area)
-        overlay = pygame.Surface((self.game_area_width, self.screen_height))
-        overlay.fill((0, 0, 0))
-        overlay.set_alpha(150)
-        surface.blit(overlay, (0, 0))
-
         # Countdown number
         if self.countdown > 0:
             text = str(self.countdown)
@@ -1517,12 +2057,17 @@ class GameplayScreen(BaseScreen):
         surface.blit(overlay, (0, 0))
 
         center_x = self.game_area_width // 2
-        self.draw_text(surface, "PAUSED", self.title_font, (255, 200, 0),
+
+        # Use Daydream font for pause text
+        pause_title_font = self.daydream_font if self.daydream_font else self.title_font
+        pause_menu_font = self.daydream_font_small if self.daydream_font_small else self.menu_font
+
+        self.draw_text(surface, "PAUSED", pause_title_font, (255, 200, 0),
                        (center_x, self.screen_height // 2 - 40))
 
-        self.draw_text(surface, "Press ENTER to Resume", self.menu_font,
+        self.draw_text(surface, "Press ENTER to Resume", pause_menu_font,
                        self.hud_color, (center_x, self.screen_height // 2 + 20))
-        self.draw_text(surface, "Press Q to Quit to Menu", self.menu_font,
+        self.draw_text(surface, "Press Q to Quit to Menu", pause_menu_font,
                        self.hud_color, (center_x, self.screen_height // 2 + 60))
 
     def _render_leash_indicators(self, surface: pygame.Surface) -> None:
@@ -1594,12 +2139,9 @@ class GameplayScreen(BaseScreen):
 
     def _render_announcement(self, surface: pygame.Surface) -> None:
         """Render a big dramatic announcement in the center of the screen."""
-        # Calculate pulse effect based on timer
-        pulse = 1.0 + 0.1 * abs((self.announcement_timer % 0.4) - 0.2) / 0.2
-
-        # Create large font
-        font_size = int(100 * pulse)
-        large_font = pygame.font.Font(None, font_size)
+        # Use Daydream font for announcement
+        large_font = self.daydream_font if self.daydream_font else pygame.font.Font(None, 100)
+        subtitle_font = self.daydream_font_small if self.daydream_font_small else self.small_font
 
         # Render text with shadow
         shadow_surf = large_font.render(self.announcement_text, True, (0, 0, 0))
@@ -1623,11 +2165,182 @@ class GameplayScreen(BaseScreen):
             subtitle = "Dogs movement is restricted!"
             subtitle2 = None
 
-        subtitle_surf = self.small_font.render(subtitle, True, (255, 255, 255))
+        subtitle_surf = subtitle_font.render(subtitle, True, (255, 255, 255))
         subtitle_rect = subtitle_surf.get_rect(center=(center_x, center_y + 60))
         surface.blit(subtitle_surf, subtitle_rect)
 
         if subtitle2:
-            subtitle2_surf = self.small_font.render(subtitle2, True, (255, 220, 100))
+            subtitle2_surf = subtitle_font.render(subtitle2, True, (255, 220, 100))
             subtitle2_rect = subtitle2_surf.get_rect(center=(center_x, center_y + 85))
             surface.blit(subtitle2_surf, subtitle2_rect)
+
+    def _render_walk_in(self, surface: pygame.Surface) -> None:
+        """Render the walk-in animation for Jazzy, Biggie, and Prissy."""
+        # Player ground offset is 230, player height/width is 216
+        player_ground_offset = 230
+        player_height = 216
+        player_width = 216
+
+        # Vertical adjustment to move animation up (same for all characters)
+        y_offset = -55
+
+        # Render Jazzy walk-in
+        # Player 1 side (facing right)
+        if self.walk_in_p1_is_jazzy and self.walk_in_frames and self.arena1:
+            frame_index = self.walk_in_frame_index % len(self.walk_in_frames)
+            walk_sprite = self.walk_in_frames[frame_index]
+            walk_sprite_height = walk_sprite.get_height()
+            walk_sprite_width = walk_sprite.get_width()
+            x_center_offset = (player_width - walk_sprite_width) // 2
+            player_feet_y = self.arena1.bounds.bottom - player_ground_offset + player_height
+            p1_render_y = int(player_feet_y - walk_sprite_height) + y_offset
+            p1_render_x = int(self.walk_in_p1_x) + x_center_offset
+            surface.blit(walk_sprite, (p1_render_x, p1_render_y))
+
+        # Player 2 side (facing left, walking from right)
+        if self.walk_in_p2_is_jazzy and self.walk_in_frames_left and self.arena2:
+            frame_index = self.walk_in_frame_index % len(self.walk_in_frames_left)
+            walk_sprite = self.walk_in_frames_left[frame_index]
+            walk_sprite_height = walk_sprite.get_height()
+            walk_sprite_width = walk_sprite.get_width()
+            x_center_offset = (player_width - walk_sprite_width) // 2
+            player_feet_y = self.arena2.bounds.bottom - player_ground_offset + player_height
+            p2_render_y = int(player_feet_y - walk_sprite_height) + y_offset
+            p2_render_x = int(self.walk_in_p2_x) + x_center_offset
+            surface.blit(walk_sprite, (p2_render_x, p2_render_y))
+
+        # Render Biggie walk-in
+        # Player 1 side (facing right)
+        if self.walk_in_p1_is_biggie and self.walk_in_biggie_frames and self.arena1:
+            frame_index = self.walk_in_biggie_frame_index % len(self.walk_in_biggie_frames)
+            walk_sprite = self.walk_in_biggie_frames[frame_index]
+            walk_sprite_height = walk_sprite.get_height()
+            walk_sprite_width = walk_sprite.get_width()
+            x_center_offset = (player_width - walk_sprite_width) // 2
+            player_feet_y = self.arena1.bounds.bottom - player_ground_offset + player_height
+            p1_render_y = int(player_feet_y - walk_sprite_height) + y_offset
+            p1_render_x = int(self.walk_in_p1_x) + x_center_offset
+            surface.blit(walk_sprite, (p1_render_x, p1_render_y))
+
+        # Player 2 side (facing left, walking from right)
+        if self.walk_in_p2_is_biggie and self.walk_in_biggie_frames_left and self.arena2:
+            frame_index = self.walk_in_biggie_frame_index % len(self.walk_in_biggie_frames_left)
+            walk_sprite = self.walk_in_biggie_frames_left[frame_index]
+            walk_sprite_height = walk_sprite.get_height()
+            walk_sprite_width = walk_sprite.get_width()
+            x_center_offset = (player_width - walk_sprite_width) // 2
+            player_feet_y = self.arena2.bounds.bottom - player_ground_offset + player_height
+            p2_render_y = int(player_feet_y - walk_sprite_height) + y_offset
+            p2_render_x = int(self.walk_in_p2_x) + x_center_offset
+            surface.blit(walk_sprite, (p2_render_x, p2_render_y))
+
+        # Render Prissy walk-in
+        # Player 1 side (facing right)
+        if self.walk_in_p1_is_prissy and self.walk_in_prissy_frames and self.arena1:
+            frame_index = self.walk_in_prissy_frame_index % len(self.walk_in_prissy_frames)
+            walk_sprite = self.walk_in_prissy_frames[frame_index]
+            walk_sprite_height = walk_sprite.get_height()
+            walk_sprite_width = walk_sprite.get_width()
+            x_center_offset = (player_width - walk_sprite_width) // 2
+            player_feet_y = self.arena1.bounds.bottom - player_ground_offset + player_height
+            p1_render_y = int(player_feet_y - walk_sprite_height) + y_offset
+            p1_render_x = int(self.walk_in_p1_x) + x_center_offset
+            surface.blit(walk_sprite, (p1_render_x, p1_render_y))
+
+        # Player 2 side (facing left, walking from right)
+        if self.walk_in_p2_is_prissy and self.walk_in_prissy_frames_left and self.arena2:
+            frame_index = self.walk_in_prissy_frame_index % len(self.walk_in_prissy_frames_left)
+            walk_sprite = self.walk_in_prissy_frames_left[frame_index]
+            walk_sprite_height = walk_sprite.get_height()
+            walk_sprite_width = walk_sprite.get_width()
+            x_center_offset = (player_width - walk_sprite_width) // 2
+            player_feet_y = self.arena2.bounds.bottom - player_ground_offset + player_height
+            p2_render_y = int(player_feet_y - walk_sprite_height) + y_offset
+            p2_render_x = int(self.walk_in_p2_x) + x_center_offset
+            surface.blit(walk_sprite, (p2_render_x, p2_render_y))
+
+        # Render Rex walk-in
+        # Player 1 side (facing right)
+        if self.walk_in_p1_is_rex and self.walk_in_rex_frames and self.arena1:
+            frame_index = self.walk_in_rex_frame_index % len(self.walk_in_rex_frames)
+            walk_sprite = self.walk_in_rex_frames[frame_index]
+            walk_sprite_height = walk_sprite.get_height()
+            walk_sprite_width = walk_sprite.get_width()
+            x_center_offset = (player_width - walk_sprite_width) // 2
+            player_feet_y = self.arena1.bounds.bottom - player_ground_offset + player_height
+            p1_render_y = int(player_feet_y - walk_sprite_height) + y_offset
+            p1_render_x = int(self.walk_in_p1_x) + x_center_offset
+            surface.blit(walk_sprite, (p1_render_x, p1_render_y))
+
+        # Player 2 side (facing left, walking from right)
+        if self.walk_in_p2_is_rex and self.walk_in_rex_frames_left and self.arena2:
+            frame_index = self.walk_in_rex_frame_index % len(self.walk_in_rex_frames_left)
+            walk_sprite = self.walk_in_rex_frames_left[frame_index]
+            walk_sprite_height = walk_sprite.get_height()
+            walk_sprite_width = walk_sprite.get_width()
+            x_center_offset = (player_width - walk_sprite_width) // 2
+            player_feet_y = self.arena2.bounds.bottom - player_ground_offset + player_height
+            p2_render_y = int(player_feet_y - walk_sprite_height) + y_offset
+            p2_render_x = int(self.walk_in_p2_x) + x_center_offset
+            surface.blit(walk_sprite, (p2_render_x, p2_render_y))
+
+        # Render Dash walk-in
+        # Player 1 side (facing right)
+        if self.walk_in_p1_is_dash and self.walk_in_dash_frames and self.arena1:
+            frame_index = self.walk_in_dash_frame_index % len(self.walk_in_dash_frames)
+            walk_sprite = self.walk_in_dash_frames[frame_index]
+            walk_sprite_height = walk_sprite.get_height()
+            walk_sprite_width = walk_sprite.get_width()
+            x_center_offset = (player_width - walk_sprite_width) // 2
+            player_feet_y = self.arena1.bounds.bottom - player_ground_offset + player_height
+            p1_render_y = int(player_feet_y - walk_sprite_height) + y_offset
+            p1_render_x = int(self.walk_in_p1_x) + x_center_offset
+            surface.blit(walk_sprite, (p1_render_x, p1_render_y))
+
+        # Player 2 side (facing left, walking from right)
+        if self.walk_in_p2_is_dash and self.walk_in_dash_frames_left and self.arena2:
+            frame_index = self.walk_in_dash_frame_index % len(self.walk_in_dash_frames_left)
+            walk_sprite = self.walk_in_dash_frames_left[frame_index]
+            walk_sprite_height = walk_sprite.get_height()
+            walk_sprite_width = walk_sprite.get_width()
+            x_center_offset = (player_width - walk_sprite_width) // 2
+            player_feet_y = self.arena2.bounds.bottom - player_ground_offset + player_height
+            p2_render_y = int(player_feet_y - walk_sprite_height) + y_offset
+            p2_render_x = int(self.walk_in_p2_x) + x_center_offset
+            surface.blit(walk_sprite, (p2_render_x, p2_render_y))
+
+        # Render Snowy walk-in
+        # Player 1 side (facing right)
+        if self.walk_in_p1_is_snowy and self.walk_in_snowy_frames and self.arena1:
+            frame_index = self.walk_in_snowy_frame_index % len(self.walk_in_snowy_frames)
+            walk_sprite = self.walk_in_snowy_frames[frame_index]
+            walk_sprite_height = walk_sprite.get_height()
+            walk_sprite_width = walk_sprite.get_width()
+            x_center_offset = (player_width - walk_sprite_width) // 2
+            player_feet_y = self.arena1.bounds.bottom - player_ground_offset + player_height
+            p1_render_y = int(player_feet_y - walk_sprite_height) + y_offset
+            p1_render_x = int(self.walk_in_p1_x) + x_center_offset
+            surface.blit(walk_sprite, (p1_render_x, p1_render_y))
+
+        # Player 2 side (facing left, walking from right)
+        if self.walk_in_p2_is_snowy and self.walk_in_snowy_frames_left and self.arena2:
+            frame_index = self.walk_in_snowy_frame_index % len(self.walk_in_snowy_frames_left)
+            walk_sprite = self.walk_in_snowy_frames_left[frame_index]
+            walk_sprite_height = walk_sprite.get_height()
+            walk_sprite_width = walk_sprite.get_width()
+            x_center_offset = (player_width - walk_sprite_width) // 2
+            player_feet_y = self.arena2.bounds.bottom - player_ground_offset + player_height
+            p2_render_y = int(player_feet_y - walk_sprite_height) + y_offset
+            p2_render_x = int(self.walk_in_p2_x) + x_center_offset
+            surface.blit(walk_sprite, (p2_render_x, p2_render_y))
+
+        # Draw "GO!" text centered (same position as countdown)
+        center_x = self.game_area_width // 2
+        center_y = self.screen_height // 2
+
+        countdown_font = self.daydream_font_countdown if self.daydream_font_countdown else pygame.font.Font(None, 80)
+        countdown_color = (251, 205, 100)  # #FBCD64
+
+        text_surface = countdown_font.render("GO!", True, countdown_color)
+        text_rect = text_surface.get_rect(center=(center_x, center_y))
+        surface.blit(text_surface, text_rect)
