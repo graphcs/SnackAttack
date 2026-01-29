@@ -5,7 +5,7 @@
       "name": "Pizza",
       "point_value": 100,
       "effect": null,
-      "spawn_weight": 40,
+      "spawn_weight": 35,
       "despawn_seconds": 8.0,
       "color": [255, 210, 80],
       "size": [48, 48]
@@ -19,7 +19,7 @@
         "magnitude": 1.5,
         "duration_seconds": 5.0
       },
-      "spawn_weight": 20,
+      "spawn_weight": 18,
       "despawn_seconds": 6.0,
       "color": [255, 252, 245],
       "size": [48, 48]
@@ -33,7 +33,7 @@
         "magnitude": 0.5,
         "duration_seconds": 3.0
       },
-      "spawn_weight": 15,
+      "spawn_weight": 13,
       "despawn_seconds": 10.0,
       "color": [60, 160, 60],
       "size": [48, 48]
@@ -47,7 +47,7 @@
         "magnitude": 1.0,
         "duration_seconds": 4.0
       },
-      "spawn_weight": 5,
+      "spawn_weight": 4,
       "despawn_seconds": 5.0,
       "color": [220, 45, 45],
       "size": [48, 48]
@@ -57,7 +57,7 @@
       "name": "Bacon",
       "point_value": 150,
       "effect": null,
-      "spawn_weight": 15,
+      "spawn_weight": 10,
       "despawn_seconds": 7.0,
       "color": [180, 60, 60],
       "size": [48, 48]
@@ -71,7 +71,7 @@
         "magnitude": 1.0,
         "duration_seconds": 2.0
       },
-      "spawn_weight": 5,
+      "spawn_weight": 10,
       "despawn_seconds": 4.0,
       "color": [150, 90, 55],
       "size": [48, 48]
@@ -85,7 +85,7 @@
         "magnitude": 2.0,
         "duration_seconds": 6.0
       },
-      "spawn_weight": 6,
+      "spawn_weight": 10,
       "despawn_seconds": 6.0,
       "color": [0, 90, 170],
       "size": [48, 48]

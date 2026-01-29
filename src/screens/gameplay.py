@@ -758,7 +758,7 @@ class GameplayScreen(BaseScreen):
 
         self.current_level = 1
         self.current_round = 1
-        self.max_rounds = 3
+        self.max_rounds = 1
 
         self.round_timer = 0.0
         self.round_duration = 60.0
