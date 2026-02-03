@@ -24,22 +24,53 @@ class AnimationController:
         self.eat_timer = 0.0
         self.eat_duration = SpriteSheetLoader.EAT_ANIMATION_DURATION
 
+        # Special manual animation tracking for cutscenes
+        self.manual_override_state: Optional[AnimationState] = None
+
         # Frame durations per state
         self.frame_durations = {
             AnimationState.IDLE: 0.0,  # No animation for idle
             AnimationState.RUN: SpriteSheetLoader.RUN_FRAME_DURATION,
-            AnimationState.EAT: SpriteSheetLoader.EAT_FRAME_DURATION
+            AnimationState.EAT: SpriteSheetLoader.EAT_FRAME_DURATION,
+            AnimationState.FACE_CAMERA: 0.1,
+            AnimationState.FACE_CAMERA_RED: 0.1,
+            AnimationState.CHILI_REACTION: 0.5  # Slower animation for emphasis (0.5s per frame * 4 = 2s total)
         }
+
 
         # Preload animations for this character
         self.loader.preload_character(character_id)
 
     def trigger_eat_animation(self) -> None:
         """Trigger the eat/attack animation."""
+        # Only trigger eat if not in manual override
+        if self.manual_override_state:
+            return
+
         self.state = AnimationState.EAT
         self.eat_timer = self.eat_duration
         self.current_frame = 0
         self.frame_timer = 0.0
+
+    def trigger_chili_animation(self, duration: float) -> None:
+        """Trigger the special chili reaction animation."""
+        # Set as manual override to lock controls/movement
+        self.manual_override_state = AnimationState.CHILI_REACTION
+        self.state = AnimationState.CHILI_REACTION
+        self.current_frame = 0
+        self.frame_timer = 0.0
+        
+        # Determine frame duration based on total duration and frame count
+        frame_count = SpriteSheetLoader.CHILI_ANIMATION_FRAME_COUNT
+        self.frame_durations[AnimationState.CHILI_REACTION] = duration / frame_count
+
+    def set_manual_state(self, state: Optional[AnimationState]) -> None:
+        """Set a manual animation state that overrides normal updates."""
+        self.manual_override_state = state
+        if state:
+            self.state = state
+            self.current_frame = 0
+            self.frame_timer = 0.0
 
     def update(self, dt: float, is_moving: bool, facing_right: bool) -> None:
         """
@@ -51,6 +82,12 @@ class AnimationController:
             facing_right: Direction character is facing
         """
         self.facing_right = facing_right
+
+        # Handle manual override (takes priority over everything)
+        if self.manual_override_state:
+            if self.manual_override_state in [AnimationState.FACE_CAMERA, AnimationState.FACE_CAMERA_RED, AnimationState.CHILI_REACTION]:
+                 self._advance_frame(dt)
+            return
 
         # Handle eat animation (takes priority)
         if self.state == AnimationState.EAT:
@@ -89,7 +126,16 @@ class AnimationController:
 
     def _get_current_frames(self) -> List[pygame.Surface]:
         """Get frames for current animation state."""
-        animation_type = 'eat' if self.state == AnimationState.EAT else 'run'
+        animation_type = 'run'
+        if self.state == AnimationState.EAT:
+            animation_type = 'eat'
+        elif self.state == AnimationState.FACE_CAMERA:
+            animation_type = 'face_camera'
+        elif self.state == AnimationState.FACE_CAMERA_RED:
+            animation_type = 'face_camera_red'
+        elif self.state == AnimationState.CHILI_REACTION:
+            animation_type = 'chili_reaction'
+            
         return self.loader.get_animation_frames(
             self.character_id, animation_type, self.facing_right
         )

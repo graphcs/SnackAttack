@@ -11,6 +11,9 @@ class AnimationState(Enum):
     IDLE = auto()      # Standing still (use first frame of run)
     RUN = auto()       # Moving
     EAT = auto()       # Collecting snack
+    FACE_CAMERA = auto() # Special state: facing camera (chili effect)
+    FACE_CAMERA_RED = auto() # Special state: facing camera and red (chili effect)
+    CHILI_REACTION = auto() # New chili reaction animation
 
 
 class SpriteSheetLoader:
@@ -20,6 +23,7 @@ class SpriteSheetLoader:
 
     # Sprite sheet configuration
     FRAME_COUNT = 3  # 3 frames per animation
+    CHILI_ANIMATION_FRAME_COUNT = 3  # 3 frames for chili reaction
 
     # Target gameplay sprite size - large for good visibility
     GAMEPLAY_SIZE = (216, 216)  # 1.5x bigger (was 144x144)
@@ -116,6 +120,12 @@ class SpriteSheetLoader:
                 return f"{name} eat:attack.png"
             else:
                 return f"{name} eat:attack sprite.png"
+        elif animation_type == 'face_camera':
+            return f"{name.lower()}_face_camera.png"
+        elif animation_type == 'face_camera_red':
+            return f"{name.lower()}_face_camera_red.png"
+        elif animation_type == 'chili_reaction':
+            return f"{name} chili reaction sprite.png"
 
         return f"{name} run sprite.png"  # Fallback
 
@@ -128,14 +138,17 @@ class SpriteSheetLoader:
             print(f"Error loading sprite sheet {filepath}: {e}")
         return None
 
-    def _extract_frames(self, sheet: pygame.Surface) -> List[pygame.Surface]:
+    def _extract_frames(self, sheet: pygame.Surface, frame_count: int = None) -> List[pygame.Surface]:
         """Extract individual frames from a sprite sheet."""
+        if frame_count is None:
+            frame_count = self.FRAME_COUNT
+
         frames = []
         sheet_width = sheet.get_width()
         sheet_height = sheet.get_height()
-        frame_width = sheet_width // self.FRAME_COUNT
+        frame_width = sheet_width // frame_count
 
-        for i in range(self.FRAME_COUNT):
+        for i in range(frame_count):
             # Create subsurface for each frame
             x = i * frame_width
             frame_rect = pygame.Rect(x, 0, frame_width, sheet_height)
@@ -181,11 +194,24 @@ class SpriteSheetLoader:
             return []
 
         # Extract and scale frames (use character-specific size if available)
-        frames = self._extract_frames(sheet)
+        # Check if this is a single-frame animation (face_camera)
+        if animation_type in ['face_camera', 'face_camera_red']:
+            # Treat entire sheet as one frame
+            frames = [sheet]
+        elif animation_type == 'chili_reaction':
+             # Use specific frame count for chili reaction
+            frames = self._extract_frames(sheet, frame_count=self.CHILI_ANIMATION_FRAME_COUNT)
+        else:
+            # Regular sprite sheet
+            frames = self._extract_frames(sheet)
+            
         target_size = self.CHARACTER_SIZES.get(character_id, self.GAMEPLAY_SIZE)
         frames = self._scale_frames(frames, target_size)
 
         # Flip if facing left (sprites are drawn facing right)
+        # Note: face_camera typically shouldn't be flipped as it faces forward,
+        # but if the original art is slightly angled, we might want to. 
+        # For now, let's keep flipping logic consistent or skip for face_camera if needed.
         if not facing_right:
             frames = self._flip_frames(frames)
 
@@ -200,7 +226,10 @@ class SpriteSheetLoader:
                 opposite_frames = self._flip_frames(frames)
             else:
                 # We have left-facing (flipped), load original for right
-                original_frames = self._extract_frames(sheet)
+                if animation_type in ['face_camera', 'face_camera_red']:
+                    original_frames = [sheet]
+                else:
+                    original_frames = self._extract_frames(sheet)
                 original_frames = self._scale_frames(original_frames, target_size)
                 opposite_frames = original_frames
             self._animation_cache[opposite_key] = opposite_frames
@@ -224,6 +253,33 @@ class SpriteSheetLoader:
         except pygame.error as e:
             print(f"Error loading portrait for {character_id}: {e}")
 
+        return None
+
+    def get_steam_sprite(self) -> Optional[pygame.Surface]:
+        """Get the steam effect sprite."""
+        # Use cache if available (reusing food cache key 'steam' which won't collide with real food ids)
+        if 'steam' in self._food_cache:
+            return self._food_cache['steam']
+            
+        # Try loading specific jazzy steam or generic steam
+        filename = "jazzy_steam_ears.png"
+        filepath = os.path.join(self._sprite_path, filename) # Check sprite path
+        
+        if not os.path.exists(filepath):
+            # Try food path just in case
+             filepath = os.path.join(self._food_path, filename)
+        
+        try:
+            if os.path.exists(filepath):
+                sprite = pygame.image.load(filepath).convert_alpha()
+                # Scale steam to reasonable size (e.g. 64x64)
+                size = (64, 64)
+                sprite = pygame.transform.smoothscale(sprite, size)
+                self._food_cache['steam'] = sprite
+                return sprite
+        except pygame.error as e:
+            print(f"Error loading steam sprite: {e}")
+            
         return None
 
     def get_food_sprite(self, snack_id: str) -> Optional[pygame.Surface]:

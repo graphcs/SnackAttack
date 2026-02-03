@@ -440,13 +440,23 @@ class Player:
         surface.blit(sprite, (render_x, render_y))
 
         # Draw steam particles (for chaos/chilli effect)
+        from ..sprites.sprite_sheet_loader import SpriteSheetLoader
+        steam_sprite = SpriteSheetLoader().get_steam_sprite()
+        
         for p in self.steam_particles:
             particle_x = int(p["x"] - self.arena_bounds.left + offset[0])
             particle_y = int(p["y"] - self.arena_bounds.top + offset[1])
             alpha = int(255 * (p["life"] / 0.8))
             size = int(p["size"])
 
-            # Draw steam puff (white/gray circle with transparency)
-            steam_surface = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
-            pygame.draw.circle(steam_surface, (255, 255, 255, alpha), (size, size), size)
-            surface.blit(steam_surface, (particle_x - size, particle_y - size))
+            if steam_sprite:
+                # Use sprite
+                sprite_size = size * 2
+                scaled_steam = pygame.transform.scale(steam_sprite, (sprite_size, sprite_size))
+                scaled_steam.set_alpha(alpha)
+                surface.blit(scaled_steam, (particle_x - size, particle_y - size))
+            else:
+                # Draw steam puff (white/gray circle with transparency) fallback
+                steam_surface = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+                pygame.draw.circle(steam_surface, (255, 255, 255, alpha), (size, size), size)
+                surface.blit(steam_surface, (particle_x - size, particle_y - size))
