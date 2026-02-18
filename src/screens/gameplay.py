@@ -549,17 +549,19 @@ class VotingSystem:
         return {opt: len(self.votes.get(opt, [])) for opt in self.options}
 
     def get_winner(self) -> Optional[str]:
-        """Get the winning vote option, or None if tied."""
+        """Get the winning vote option. Breaks ties by picking first option in list."""
         counts = self.get_vote_counts()
         if not counts:
-            return None
+            return None if self.options else None
             
-        # Sort by count desc
-        sorted_votes = sorted(counts.items(), key=lambda x: x[1], reverse=True)
-        if len(sorted_votes) > 1 and sorted_votes[0][1] == sorted_votes[1][1]:
-            return None  # Tie between top two
+        # Sort by count desc, then by option order for tiebreaker
+        sorted_votes = sorted(
+            counts.items(),
+            key=lambda x: (-x[1], self.options.index(x[0]))
+        )
         
-        return sorted_votes[0][0]
+        # Always return a winner (no ties)
+        return sorted_votes[0][0] if sorted_votes else None
 
     def update(self, dt: float) -> Optional[str]:
         """Update voting state. Returns winner if voting just ended."""
@@ -775,8 +777,18 @@ class ChatSimulator:
         if self.auto_vote and voting_system.voting_active and voting_system.options:
             self.auto_vote_timer -= dt
             if self.auto_vote_timer <= 0:
-                # Random vote
-                vote_type = random.choice(voting_system.options)
+                # Smart voting: vote for option with fewest votes to avoid ties
+                counts = voting_system.get_vote_counts()
+                if counts:
+                    # Find option with minimum votes
+                    min_votes = min(counts.values())
+                    candidates = [opt for opt in voting_system.options if counts.get(opt, 0) == min_votes]
+                    # Randomly pick from tied minimum options
+                    vote_type = random.choice(candidates)
+                else:
+                    # No votes yet, pick randomly from options
+                    vote_type = random.choice(voting_system.options)
+                
                 self.inject_vote(vote_type, voting_system)
                 self.auto_vote_timer = self.auto_vote_interval + random.uniform(-0.5, 0.5)
 
