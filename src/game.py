@@ -3,6 +3,7 @@
 import pygame
 import os
 from typing import Optional
+from pathlib import Path
 
 from .core.config_manager import ConfigManager
 from .core.event_bus import EventBus, GameEvent
@@ -247,6 +248,24 @@ class Game:
 
 def main():
     """Entry point for the game."""
+    from .core.env_loader import validate_required_env
+
+    project_root = Path(__file__).resolve().parent.parent
+    env_path = project_root / ".env"
+    is_valid, missing_keys, env_exists = validate_required_env(
+        ["REMBG_API_KEY", "OPENROUTER_API_KEY"],
+        env_path=env_path
+    )
+
+    if not is_valid:
+        print("ERROR: Cannot start game due to missing required environment configuration.")
+        if not env_exists:
+            print(f"- Missing file: {env_path}")
+        if missing_keys:
+            print(f"- Missing keys in .env: {', '.join(missing_keys)}")
+        print("- Create/update .env (use .env.example as a template), then run again.")
+        return
+
     game = Game()
     game.run()
 

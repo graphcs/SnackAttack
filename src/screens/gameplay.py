@@ -1286,7 +1286,7 @@ class GameplayScreen(BaseScreen):
         self.chat_simulator.add_message("System", "Welcome!", (200, 200, 100))
 
         # Try to connect to Twitch if configured
-        load_env()  # Load .env file if present
+        env_loaded = load_env()  # Load .env file if present
         twitch_config = self.config.get_twitch_config()
 
         if twitch_config.get("enabled", False):
@@ -1307,6 +1307,10 @@ class GameplayScreen(BaseScreen):
                     self.chat_simulator.add_message("System", error[:15], (255, 150, 150))
                     self.twitch_manager = None
             else:
+                if not env_loaded:
+                    self.chat_simulator.add_message("System", ".env missing", (255, 200, 100))
+                    self.chat_simulator.add_message("System", "create from", (255, 200, 100))
+                    self.chat_simulator.add_message("System", ".env.example", (255, 200, 100))
                 if not token:
                     self.chat_simulator.add_message("System", "No token in", (255, 200, 100))
                     self.chat_simulator.add_message("System", ".env file", (255, 200, 100))
@@ -1319,12 +1323,23 @@ class GameplayScreen(BaseScreen):
 
     def _restart_background_music(self) -> None:
         """Start gameplay music from the beginning."""
+        audio_settings = self.config.get_config("audio_settings")
+        music_enabled = audio_settings.get("music_enabled", True)
+        if not music_enabled:
+            if pygame.mixer.get_init():
+                pygame.mixer.music.stop()
+            return
+
+        master_volume = audio_settings.get("master_volume", 0.8)
+        music_volume = audio_settings.get("music_volume", 0.6)
+        effective_volume = max(0.0, min(1.0, master_volume * music_volume))
+
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         music_path = os.path.join(base_dir, "Sound effect", "Gameplay.mp3")
         if os.path.exists(music_path):
             try:
                 pygame.mixer.music.load(music_path)
-                pygame.mixer.music.set_volume(0.3)
+                pygame.mixer.music.set_volume(effective_volume)
                 pygame.mixer.music.play(-1)  # Loop indefinitely
             except pygame.error as e:
                 print(f"Could not play gameplay music: {e}")

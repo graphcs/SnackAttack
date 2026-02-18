@@ -2,22 +2,22 @@
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Sequence, Tuple
 
 
-def load_env(env_path: Optional[Path] = None) -> None:
-    """Load environment variables from a .env file.
+_missing_env_warned = False
 
-    Args:
-        env_path: Optional path to .env file. If not provided, looks for
-                  .env in the project root (parent of src directory).
-    """
+
+def _resolve_env_path(env_path: Optional[Path] = None) -> Path:
+    """Resolve the .env file path."""
     if env_path is None:
-        # Default to project root
-        env_path = Path(__file__).parent.parent.parent / ".env"
+        return Path(__file__).parent.parent.parent / ".env"
+    return env_path
 
-    if not env_path.exists():
-        return
+
+def _parse_env_file(env_path: Path) -> Dict[str, str]:
+    """Parse .env file into key/value pairs."""
+    parsed: Dict[str, str] = {}
 
     with open(env_path, 'r') as f:
         for line in f:
@@ -34,7 +34,60 @@ def load_env(env_path: Optional[Path] = None) -> None:
                 if (value.startswith('"') and value.endswith('"')) or \
                    (value.startswith("'") and value.endswith("'")):
                     value = value[1:-1]
-                os.environ[key] = value
+                parsed[key] = value
+
+    return parsed
+
+
+def load_env(env_path: Optional[Path] = None) -> bool:
+    """Load environment variables from a .env file.
+
+    Args:
+        env_path: Optional path to .env file. If not provided, looks for
+                  .env in the project root (parent of src directory).
+
+    Returns:
+        True if .env was found and loaded, False otherwise.
+    """
+    global _missing_env_warned
+
+    env_path = _resolve_env_path(env_path)
+
+    if not env_path.exists():
+        if not _missing_env_warned:
+            print(f"Warning: .env file not found at {env_path}. Create it from .env.example if needed.")
+            _missing_env_warned = True
+        return False
+
+    parsed = _parse_env_file(env_path)
+    for key, value in parsed.items():
+        os.environ[key] = value
+
+    return True
+
+
+def validate_required_env(required_keys: Sequence[str], env_path: Optional[Path] = None) -> Tuple[bool, List[str], bool]:
+    """Validate that .env exists and contains non-empty required keys.
+
+    Args:
+        required_keys: Required .env variable names.
+        env_path: Optional explicit .env path.
+
+    Returns:
+        Tuple of (is_valid, missing_keys, env_exists).
+    """
+    resolved_env_path = _resolve_env_path(env_path)
+
+    if not resolved_env_path.exists():
+        load_env(resolved_env_path)
+        return False, list(required_keys), False
+
+    parsed = _parse_env_file(resolved_env_path)
+    for key, value in parsed.items():
+        os.environ[key] = value
+
+    missing_keys = [key for key in required_keys if not parsed.get(key, "").strip()]
+    return len(missing_keys) == 0, missing_keys, True
 
 
 def get_twitch_token() -> Optional[str]:
