@@ -989,6 +989,7 @@ class GameplayScreen(BaseScreen):
         self.flash_color = (0, 0, 0)
         self.flash_alpha = 0
         self.flash_timer = 0.0
+        self.flash_duration = 0.3  # seconds — updated whenever flash is triggered
 
         # Jazzy's Chili Effect State
         self.chili_sequence_active = False
@@ -1999,11 +2000,14 @@ class GameplayScreen(BaseScreen):
         if self.announcement_timer > 0:
             self.announcement_timer -= dt
 
-        # Update flash timer
+        # Update flash timer - fade out smoothly
         if self.flash_timer > 0:
             self.flash_timer -= dt
             if self.flash_timer <= 0:
                 self.flash_alpha = 0
+            else:
+                # Linearly fade flash_alpha to 0 as timer counts down
+                self.flash_alpha = int(150 * (self.flash_timer / max(0.001, self.flash_duration)))
 
         # Update point popups
         for popup in self.point_popups:
@@ -2187,6 +2191,7 @@ class GameplayScreen(BaseScreen):
             self.announcement_timer = self.announcement_duration
             self.flash_alpha = 150
             self.flash_timer = 0.3
+            self.flash_duration = 0.3
             
         elif mode == VotingMode.TREAT:
             selected_snack = None
@@ -2311,10 +2316,11 @@ class GameplayScreen(BaseScreen):
         self._render_leash_indicators(surface)
 
         # Draw screen flash effect
+        # Use SRCALPHA surface for reliable per-pixel alpha on macOS SDL2 Metal backend
         if self.flash_alpha > 0:
-            flash_surface = pygame.Surface((self.game_area_width, self.screen_height))
-            flash_surface.fill(self.flash_color)
-            flash_surface.set_alpha(self.flash_alpha)
+            r, g, b = self.flash_color[0], self.flash_color[1], self.flash_color[2]
+            flash_surface = pygame.Surface((self.game_area_width, self.screen_height), pygame.SRCALPHA)
+            flash_surface.fill((r, g, b, max(0, min(255, self.flash_alpha))))
             surface.blit(flash_surface, (0, 0))
 
         # Draw announcement text
@@ -2344,11 +2350,11 @@ class GameplayScreen(BaseScreen):
             border_thickness = 20
             red_val = 200 + int(50 * abs(pygame.time.get_ticks() % 500 - 250) / 250)
             pygame.draw.rect(surface, (red_val, 0, 0), (0, 0, self.game_area_width, self.screen_height), border_thickness)
-            
+
             # Additional screen tinted overlay
-            overlay = pygame.Surface((self.game_area_width, self.screen_height))
-            overlay.fill((255, 0, 0))
-            overlay.set_alpha(30) # Slight red tint
+            # Use SRCALPHA with alpha in fill color — set_alpha() is unreliable on macOS SDL2 Metal
+            overlay = pygame.Surface((self.game_area_width, self.screen_height), pygame.SRCALPHA)
+            overlay.fill((255, 0, 0, 30))  # Slight red tint
             surface.blit(overlay, (0, 0))
 
     def _render_crowd_chaos_tint(self, surface: pygame.Surface) -> None:
@@ -2363,6 +2369,7 @@ class GameplayScreen(BaseScreen):
         if alpha <= 0:
             return
 
+        # Use SRCALPHA surface for reliable per-pixel alpha compositing on macOS
         tint_surface = pygame.Surface((self.game_area_width, self.screen_height), pygame.SRCALPHA)
         tint_surface.fill((220, 40, 40, alpha))
         surface.blit(tint_surface, (0, 0))
@@ -2602,9 +2609,9 @@ class GameplayScreen(BaseScreen):
     def _render_pause(self, surface: pygame.Surface) -> None:
         """Render the pause overlay."""
         # Semi-transparent overlay (only over game area)
-        overlay = pygame.Surface((self.game_area_width, self.screen_height))
-        overlay.fill((0, 0, 0))
-        overlay.set_alpha(200)
+        # Use SRCALPHA + alpha in fill — set_alpha() on plain Surface is broken on macOS SDL2 Metal
+        overlay = pygame.Surface((self.game_area_width, self.screen_height), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 200))
         surface.blit(overlay, (0, 0))
 
         center_x = self.game_area_width // 2
@@ -2667,9 +2674,9 @@ class GameplayScreen(BaseScreen):
                 restricted_width = arena.bounds.right - restrict_x
                 if restricted_width > 10:
                     # Semi-transparent red overlay on restricted area
-                    restricted_surface = pygame.Surface((restricted_width, arena.bounds.height - 80))
-                    restricted_surface.fill((200, 50, 50))
-                    restricted_surface.set_alpha(80)
+                    # Use SRCALPHA + alpha in fill — set_alpha() on plain Surface is broken on macOS SDL2 Metal
+                    restricted_surface = pygame.Surface((restricted_width, arena.bounds.height - 80), pygame.SRCALPHA)
+                    restricted_surface.fill((200, 50, 50, 80))
                     surface.blit(restricted_surface, (restrict_x, arena.bounds.top + 60))
 
                     # Draw X marks

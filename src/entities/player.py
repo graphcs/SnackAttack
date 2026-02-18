@@ -443,28 +443,29 @@ class Player:
         if self.is_invincible:
             if int(time.time() * 10) % 2 == 0:
                 # Create a white-tinted version
+                # Use BLEND_RGB_ADD (not RGBA) to avoid alpha channel corruption on macOS
                 flash_sprite = sprite.copy()
-                flash_sprite.fill((255, 255, 255, 100), special_flags=pygame.BLEND_RGBA_ADD)
+                flash_sprite.fill((255, 255, 255, 0), special_flags=pygame.BLEND_RGB_ADD)
                 sprite = flash_sprite
 
         # Handle slow effect (broccoli) - turn green
         has_slow_effect = any(e["type"] == "slow" for e in self.active_effects)
         if has_slow_effect:
             green_sprite = sprite.copy()
-            green_sprite.fill((0, 150, 0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+            green_sprite.fill((0, 150, 0, 0), special_flags=pygame.BLEND_RGB_ADD)
             sprite = green_sprite
 
         # Handle chaos effect (chilli) - turn red
         has_chaos_effect = any(e["type"] == "chaos" for e in self.active_effects)
         if has_chaos_effect:
             red_sprite = sprite.copy()
-            red_sprite.fill((150, 0, 0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+            red_sprite.fill((150, 0, 0, 0), special_flags=pygame.BLEND_RGB_ADD)
             sprite = red_sprite
 
         # Handle boost effect (red bull) - add blue tint
         if self.has_boost_effect() and not using_boost_sheet:
             blue_sprite = sprite.copy()
-            blue_sprite.fill((0, 50, 150, 0), special_flags=pygame.BLEND_RGBA_ADD)
+            blue_sprite.fill((0, 50, 150, 0), special_flags=pygame.BLEND_RGB_ADD)
             sprite = blue_sprite
 
         # Draw speed lines BEHIND the sprite (legacy simple lines)
@@ -513,8 +514,12 @@ class Player:
                 # Use sprite
                 sprite_size = size * 2
                 scaled_steam = pygame.transform.scale(steam_sprite, (sprite_size, sprite_size))
-                scaled_steam.set_alpha(alpha)
-                surface.blit(scaled_steam, (particle_x - size, particle_y - size))
+                # Use BLEND_RGBA_MULT for reliable alpha fading on macOS SDL2 Metal
+                faded_steam = scaled_steam.copy()
+                fade_mask = pygame.Surface(faded_steam.get_size(), pygame.SRCALPHA)
+                fade_mask.fill((255, 255, 255, alpha))
+                faded_steam.blit(fade_mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+                surface.blit(faded_steam, (particle_x - size, particle_y - size))
             else:
                 # Draw steam puff (white/gray circle with transparency) fallback
                 steam_surface = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)

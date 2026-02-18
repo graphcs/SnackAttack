@@ -1077,15 +1077,17 @@ class StormIntroSequence:
             scaled_size = max(16, int(base_size * self._title_scale))
             font = pygame.font.Font(None, scaled_size)
 
-            # Shadow
-            shadow = font.render(text, True, (0, 0, 0))
+            # Shadow — use SRCALPHA surface to avoid set_alpha() issues on macOS SDL2 Metal
+            shadow_raw = font.render(text, True, (0, 0, 0))
+            shadow = shadow_raw.convert_alpha()
             shadow.set_alpha(self._title_alpha // 2)
             sx = (self.screen_width - shadow.get_width()) // 2 + 3
             sy = self.screen_height // 2 - shadow.get_height() // 2 - 60 + 3
             surface.blit(shadow, (sx, sy))
 
             # Main text (gold)
-            main = font.render(text, True, (255, 200, 50))
+            main_raw = font.render(text, True, (255, 200, 50))
+            main = main_raw.convert_alpha()
             main.set_alpha(self._title_alpha)
             mx = (self.screen_width - main.get_width()) // 2
             my = self.screen_height // 2 - main.get_height() // 2 - 60
@@ -1093,8 +1095,10 @@ class StormIntroSequence:
 
         # "GO!" text
         if self._go_alpha > 0 and self._go_font:
-            go_text = self._go_font.render("GO!", True, (255, 230, 50))
-            go_shadow = self._go_font.render("GO!", True, (80, 60, 0))
+            go_text_raw = self._go_font.render("GO!", True, (255, 230, 50))
+            go_shadow_raw = self._go_font.render("GO!", True, (80, 60, 0))
+            go_shadow = go_shadow_raw.convert_alpha()
+            go_text = go_text_raw.convert_alpha()
             go_shadow.set_alpha(self._go_alpha)
             go_text.set_alpha(self._go_alpha)
 
