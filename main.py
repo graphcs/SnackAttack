@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Jazzy's Snack Attack
+Jazzy's Treat Storm - Main Game Entry Point
 A retro 2D arcade game where dogs collect snacks!
 
 Run this file to start the game:

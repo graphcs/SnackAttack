@@ -66,7 +66,7 @@ class Game:
         self.screen_height = int(self.game_height * self.scale_factor)
 
         self.fps = self.config.get("game_settings.window.fps", 60)
-        title = self.config.get("game_settings.window.title", "Jazzy's Snack Attack")
+        title = self.config.get("game_settings.window.title", "Jazzy's Treat Storm")
 
         # Create the display surface (actual window) - resizable
         self.screen = pygame.display.set_mode((self.screen_width, self.screen_height), pygame.RESIZABLE)

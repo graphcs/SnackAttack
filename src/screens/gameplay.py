@@ -1130,8 +1130,8 @@ class GameplayScreen(BaseScreen):
         if os.path.exists(logo_path):
             self.logo_image = pygame.image.load(logo_path).convert_alpha()
             # Scale to 52.8% of original size (0.44 * 1.2)
-            new_width = int(self.logo_image.get_width() * 0.528)
-            new_height = int(self.logo_image.get_height() * 0.528)
+            new_width = int(self.logo_image.get_width() * 0.328)
+            new_height = int(self.logo_image.get_height() * 0.328)
             self.logo_image = pygame.transform.scale(self.logo_image, (new_width, new_height))
 
         # Load battlefield images for each player
