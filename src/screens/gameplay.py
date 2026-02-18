@@ -978,6 +978,8 @@ class GameplayScreen(BaseScreen):
         self.daydream_font_smallest: Optional[pygame.font.Font] = None
         self.daydream_font_tiny: Optional[pygame.font.Font] = None
         self.daydream_font_countdown: Optional[pygame.font.Font] = None
+        self.daydream_font_chaos_title: Optional[pygame.font.Font] = None
+        self.daydream_font_chaos_number: Optional[pygame.font.Font] = None
 
         # Announcement system for dramatic effect reveals
         self.announcement_text = ""
@@ -1113,6 +1115,8 @@ class GameplayScreen(BaseScreen):
             self.daydream_font_tiny = pygame.font.Font(font_path, 11)  # For voting labels
             self.daydream_font_countdown = pygame.font.Font(font_path, 120)  # For countdown
             self.daydream_font_popup = pygame.font.Font(font_path, 24)  # For point popups
+            self.daydream_font_chaos_title = pygame.font.Font(font_path, 48)  # For Crowd Chaos title
+            self.daydream_font_chaos_number = pygame.font.Font(font_path, 140)  # For Crowd Chaos countdown number
 
     def _load_background(self) -> None:
         """Load the battle screen background image and logo."""
@@ -2378,14 +2382,14 @@ class GameplayScreen(BaseScreen):
         """Render countdown and live-chaos labels to clearly communicate the event."""
         center_x = self.game_area_width // 2
 
-        title_font = self.daydream_font_small if self.daydream_font_small else self.menu_font
-        value_font = self.daydream_font if self.daydream_font else self.title_font
+        title_font = self.daydream_font_chaos_title if self.daydream_font_chaos_title else self.daydream_font_small if self.daydream_font_small else self.menu_font
+        value_font = self.daydream_font_chaos_number if self.daydream_font_chaos_number else self.daydream_font if self.daydream_font else self.title_font
         helper_font = self.daydream_font_tiny if self.daydream_font_tiny else self.small_font
 
         if self.crowd_chaos_countdown_active:
             title = "CROWD CHAOS IN"
             title_surf = title_font.render(title, True, (255, 235, 235))
-            title_rect = title_surf.get_rect(center=(center_x, 300))
+            title_rect = title_surf.get_rect(center=(center_x, 280))
             surface.blit(title_surf, title_rect)
 
             pulse_scale = 1.0 + 0.08 * abs(pygame.time.get_ticks() % 400 - 200) / 200
@@ -2399,7 +2403,7 @@ class GameplayScreen(BaseScreen):
                         max(1, int(number_surf.get_height() * pulse_scale)),
                     ),
                 )
-            number_rect = number_surf.get_rect(center=(center_x, 350))
+            number_rect = number_surf.get_rect(center=(center_x, 380))
             surface.blit(number_surf, number_rect)
 
         elif self.crowd_chaos_active and self.voting_system:
