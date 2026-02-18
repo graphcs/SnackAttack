@@ -16,6 +16,8 @@ class GameState(Enum):
     PAUSED = auto()
     SETTINGS = auto()
     GAME_OVER = auto()
+    UPLOAD_AVATAR = auto()  # Custom dog avatar upload
+    AVATAR_SHOWCASE = auto()  # Hero showcase for a dog character
 
 
 class StateMachine:

@@ -33,7 +33,8 @@ class ConfigManager:
             "audio_settings",
             "controls",
             "treat_attack_settings",
-            "twitch_config"
+            "twitch_config",
+            "powerup_visuals"
         ]
 
         for config_name in config_files:

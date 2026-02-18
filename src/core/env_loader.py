@@ -53,3 +53,20 @@ def get_twitch_client_id() -> Optional[str]:
         The client ID string, or None if not set.
     """
     return os.environ.get('TWITCH_CLIENT_ID')
+
+
+def get_openrouter_key() -> Optional[str]:
+    """Get the OpenRouter API key from environment.
+
+    Returns:
+        The API key string, or None if not set.
+    """
+    return os.environ.get('OPENROUTER_API_KEY')
+
+def get_rembg_key() -> Optional[str]:
+    """Get the rembg API key from environment.
+
+    Returns:
+        The API key string, or None if not set.
+    """
+    return os.environ.get('REMBG_API_KEY')

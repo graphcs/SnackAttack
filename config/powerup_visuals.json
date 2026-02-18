@@ -1,0 +1,81 @@
+{
+  "wings": {
+    "enabled": true,
+    "color": [255, 215, 80],
+    "glow_color": [255, 240, 150],
+    "opacity": 180,
+    "flap_speed": 4.0,
+    "flap_amplitude": 18,
+    "wing_width": 38,
+    "wing_height": 50,
+    "feather_count": 5,
+    "trail_particles": true,
+    "trail_particle_rate": 3,
+    "trail_particle_lifetime": 0.6
+  },
+  "speed_streaks": {
+    "enabled": true,
+    "afterimage_count": 3,
+    "afterimage_spacing": 22,
+    "afterimage_base_alpha": 90,
+    "streak_color_boost": [100, 200, 255],
+    "streak_color_speed": [255, 200, 80],
+    "streak_width_range": [40, 80],
+    "streak_rate": 3,
+    "streak_lifetime": 0.25,
+    "particle_rate": 5,
+    "particle_lifetime": 0.4,
+    "particle_size_range": [3, 7]
+  },
+  "aura": {
+    "enabled": true,
+    "pulse_speed": 3.0,
+    "base_radius_padding": 15,
+    "pulse_amplitude": 8,
+    "base_alpha": 50,
+    "ring_width": 3,
+    "colors": {
+      "boost": [80, 160, 255],
+      "speed_boost": [255, 200, 80],
+      "invincibility": [255, 255, 200],
+      "chaos": [255, 60, 60],
+      "slow": [60, 180, 60]
+    },
+    "sparkle_count": 8,
+    "sparkle_speed": 2.5,
+    "sparkle_size": 4
+  },
+  "status_indicator": {
+    "enabled": true,
+    "bar_width": 50,
+    "bar_height": 6,
+    "bar_offset_y": -12,
+    "icon_size": 24,
+    "icon_offset_y": -38,
+    "icon_bob_speed": 2.0,
+    "icon_bob_amplitude": 3
+  },
+  "snack_glow": {
+    "enabled": true,
+    "powerup_snack_ids": ["bone", "red_bull", "steak"],
+    "glow_radius_padding": 12,
+    "glow_pulse_speed": 3.5,
+    "glow_base_alpha": 40,
+    "glow_pulse_alpha": 30,
+    "sparkle_count": 6,
+    "sparkle_orbit_speed": 2.0,
+    "sparkle_orbit_radius": 20,
+    "sparkle_size": 3,
+    "beam_enabled": true,
+    "beam_width": 4,
+    "beam_height": 30,
+    "beam_alpha": 60
+  },
+  "pickup_flash": {
+    "enabled": true,
+    "duration": 0.3,
+    "max_alpha": 80,
+    "ring_expand_speed": 300,
+    "ring_max_radius": 60
+  }
+}

@@ -13,6 +13,8 @@ from ..entities.ai_player import AIPlayer
 from ..entities.snack import Snack
 from ..interaction.twitch_chat import TwitchChatManager, TWITCH_VOTE_EVENT
 from ..sprites.sprite_sheet_loader import AnimationState
+from ..effects.storm_intro import StormIntroSequence
+from ..effects.powerup_vfx import SnackGlow
 
 from enum import Enum, auto
 
@@ -176,6 +178,11 @@ class Arena:
         # Create surface for this arena (with alpha for transparency)
         self.surface = pygame.Surface((bounds.width, bounds.height), pygame.SRCALPHA)
 
+        # Power-up snack glow effect
+        from ..core.config_manager import ConfigManager
+        glow_cfg = ConfigManager().get("powerup_visuals.snack_glow", {})
+        self.snack_glow = SnackGlow(glow_cfg)
+
     def spawn_snack(self, snack_configs: List[Dict[str, Any]]) -> Optional[FallingSnack]:
         """Trigger lightning and queue snack spawn."""
         if len(self.snacks) >= self.max_snacks:
@@ -297,6 +304,9 @@ class Arena:
         # Update snacks (remove inactive ones)
         self.snacks = [s for s in self.snacks if s.update(dt)]
 
+        # Update snack glow timer
+        self.snack_glow.update(dt)
+
     def render(self) -> pygame.Surface:
         """Render the arena with background image or wooden floor."""
         # Clear the surface
@@ -343,8 +353,14 @@ class Arena:
         if self.lightning_active and self.lightning_segments:
             self._draw_lightning()
 
-        # Draw snacks
+        # Draw snacks (with glow for power-up items)
         for snack in self.snacks:
+            if self.snack_glow.should_glow(snack.snack_id):
+                # Render pulsing glow + sparkles behind the snack sprite
+                cx = int(snack.x - self.bounds.left + snack.width // 2)
+                cy = int(snack.y - self.bounds.top + snack.height // 2)
+                self.snack_glow.render(self.surface, cx, cy,
+                                       snack.snack_id, snack.color)
             snack.render(self.surface)
 
         # Draw player
@@ -469,17 +485,37 @@ class VotingSystem:
         self.cooldown_timer = 0.0
         self.last_winner: Optional[str] = None
         self.correct_trivia_answer: Optional[str] = None  # For TRIVIA mode
+        self.single_vote_mode = False
+        self.single_vote_completed = False
 
-    def set_mode(self, mode: VotingMode, options: List[str], correct_answer: str = None) -> None:
+    def set_mode(
+        self,
+        mode: VotingMode,
+        options: List[str],
+        correct_answer: str = None,
+        activate: bool = True,
+        single_vote_mode: bool = False,
+    ) -> None:
         """Set the voting mode and options."""
         self.mode = mode
         self.options = options
         self.correct_trivia_answer = correct_answer
+        self.single_vote_mode = single_vote_mode
+        self.single_vote_completed = False
         self.reset_votes()
-        # Reset timers
+        self.voting_active = False
+        self.voting_timer = self.voting_duration
+        self.cooldown_timer = 0.0
+        if activate:
+            self.start_voting_window()
+
+    def start_voting_window(self) -> None:
+        """Start a fresh voting window for the currently configured mode."""
+        self.reset_votes()
         self.voting_active = True
         self.voting_timer = self.voting_duration
         self.cooldown_timer = 0.0
+        self.single_vote_completed = False
 
     def add_vote(self, vote_type: str, voter_id: str) -> bool:
         """Add a vote. Returns True if successful."""
@@ -530,9 +566,13 @@ class VotingSystem:
         if self.cooldown_timer > 0:
             self.cooldown_timer -= dt
             if self.cooldown_timer <= 0:
-                self.reset_votes()
-                self.voting_active = True
-                self.voting_timer = self.voting_duration
+                if self.single_vote_mode:
+                    self.voting_active = False
+                    self.single_vote_completed = True
+                else:
+                    self.reset_votes()
+                    self.voting_active = True
+                    self.voting_timer = self.voting_duration
             return None
 
         if self.voting_active:
@@ -597,7 +637,7 @@ class VotingMeter:
             else:
                 status_text = f"TIE! ({int(voting_system.cooldown_timer)}s)"
         else:
-            status_text = "Waiting..."
+            status_text = "Crowd Chaos soon"
 
         text_surf = small_font.render(status_text, True, status_color)
         
@@ -869,6 +909,23 @@ class GameplayScreen(BaseScreen):
         self.countdown = 0
         self.countdown_timer = 0.0
 
+        # Crowd Chaos timing (one event per round)
+        self.crowd_chaos_trigger_elapsed = 40.0
+        self.crowd_chaos_countdown_duration = 5.0
+        self.crowd_chaos_countdown_active = False
+        self.crowd_chaos_countdown_timer = 0.0
+        self.crowd_chaos_countdown_value = 0
+        self.crowd_chaos_triggered = False
+        self.crowd_chaos_active = False
+        self.crowd_chaos_mode: Optional[VotingMode] = None
+        self.crowd_chaos_options: List[str] = []
+        self.crowd_chaos_correct_answer: Optional[str] = None
+        self.current_trivia_question = ""
+
+        # Crowd Chaos screen tint
+        self.crowd_chaos_tint_alpha = 0.0
+        self.crowd_chaos_tint_max_alpha = 75
+
         self.paused = False
 
         # Round scores
@@ -994,6 +1051,17 @@ class GameplayScreen(BaseScreen):
         self.walk_in_rex_frames_left: List[pygame.Surface] = []
         self.walk_in_dash_frames_left: List[pygame.Surface] = []
         self.walk_in_snowy_frames_left: List[pygame.Surface] = []
+        # Custom character walk-in support
+        self.walk_in_p1_is_custom = False
+        self.walk_in_p2_is_custom = False
+        self.walk_in_custom_frames: List[pygame.Surface] = []
+        self.walk_in_custom_frames_left: List[pygame.Surface] = []
+        self.walk_in_custom_frame_index = 0
+        self.walk_in_custom_frame_timer = 0.0
+
+        # Storm intro sequence (plays before countdown)
+        self.storm_intro: Optional[StormIntroSequence] = None
+        self.storm_intro_active = False
 
     def on_enter(self, data: Dict[str, Any] = None) -> None:
         """Initialize gameplay."""
@@ -1027,8 +1095,8 @@ class GameplayScreen(BaseScreen):
         # Restart background music
         self._restart_background_music()
 
-        # Start countdown
-        self._start_countdown()
+        # Start storm intro sequence before countdown
+        self._start_storm_intro()
 
     def _load_custom_font(self) -> None:
         """Load custom Daydream font for score and timer."""
@@ -1237,15 +1305,22 @@ class GameplayScreen(BaseScreen):
         p1_is_snowy = self.player1 and self.player1.character_id == 'snowy'
         p2_is_snowy = self.player2 and self.player2.character_id == 'snowy'
 
+        # Check for custom characters (any character not in the built-in set)
+        builtin_ids = {'jazzy', 'biggie', 'prissy', 'rex', 'dash', 'snowy'}
+        p1_is_custom = self.player1 and self.player1.character_id not in builtin_ids
+        p2_is_custom = self.player2 and self.player2.character_id not in builtin_ids
+
         # Position dogs with walk-in animations off-screen during countdown (they'll walk in after)
         # Other players stay at their normal center positions
+        p1_has_walkin = p1_is_jazzy or p1_is_biggie or p1_is_prissy or p1_is_rex or p1_is_dash or p1_is_snowy or p1_is_custom
+        p2_has_walkin = p2_is_jazzy or p2_is_biggie or p2_is_prissy or p2_is_rex or p2_is_dash or p2_is_snowy or p2_is_custom
         if self.player1:
-            if p1_is_jazzy or p1_is_biggie or p1_is_prissy or p1_is_rex or p1_is_dash or p1_is_snowy:
+            if p1_has_walkin:
                 self.player1.x = -1000
             else:
                 self.player1.x = self.arena1.bounds.centerx - self.player1.width // 2
         if self.player2:
-            if p2_is_jazzy or p2_is_biggie or p2_is_prissy or p2_is_rex or p2_is_dash or p2_is_snowy:
+            if p2_has_walkin:
                 self.player2.x = -1000
             else:
                 self.player2.x = self.arena2.bounds.centerx - self.player2.width // 2
@@ -1279,6 +1354,11 @@ class GameplayScreen(BaseScreen):
         self.walk_in_p2_is_dash = self.player2 and self.player2.character_id == 'dash'
         self.walk_in_p1_is_snowy = self.player1 and self.player1.character_id == 'snowy'
         self.walk_in_p2_is_snowy = self.player2 and self.player2.character_id == 'snowy'
+
+        # Check for custom characters
+        builtin_ids = {'jazzy', 'biggie', 'prissy', 'rex', 'dash', 'snowy'}
+        self.walk_in_p1_is_custom = self.player1 and self.player1.character_id not in builtin_ids
+        self.walk_in_p2_is_custom = self.player2 and self.player2.character_id not in builtin_ids
 
         loader = SpriteSheetLoader()
 
@@ -1354,6 +1434,20 @@ class GameplayScreen(BaseScreen):
         else:
             self.walk_in_snowy_frames_left = []
 
+        # Load custom character walking frames (use default size similar to Jazzy)
+        self.walk_in_custom_frame_index = 0
+        self.walk_in_custom_frame_timer = 0.0
+        if self.walk_in_p1_is_custom:
+            self.walk_in_custom_frames = loader.get_walking_frames(
+                self.player1.character_id, facing_right=True, target_size=(115, 107))
+        else:
+            self.walk_in_custom_frames = []
+        if self.walk_in_p2_is_custom:
+            self.walk_in_custom_frames_left = loader.get_walking_frames(
+                self.player2.character_id, facing_right=False, target_size=(115, 107))
+        else:
+            self.walk_in_custom_frames_left = []
+
         # Set up walk-in positions for player 1 (walks from left to center)
         if self.arena1:
             self.walk_in_p1_start_x = self.arena1.bounds.left - self.player1.width
@@ -1425,6 +1519,14 @@ class GameplayScreen(BaseScreen):
             if snowy_frames:
                 self.walk_in_snowy_frame_index = (self.walk_in_snowy_frame_index + 1) % len(snowy_frames)
 
+        # Update custom character animation frame
+        self.walk_in_custom_frame_timer += dt
+        if self.walk_in_custom_frame_timer >= self.walk_in_frame_duration:
+            self.walk_in_custom_frame_timer -= self.walk_in_frame_duration
+            custom_frames = self.walk_in_custom_frames if self.walk_in_custom_frames else self.walk_in_custom_frames_left
+            if custom_frames:
+                self.walk_in_custom_frame_index = (self.walk_in_custom_frame_index + 1) % len(custom_frames)
+
         # Calculate progress (0 to 1)
         progress = 1.0 - (self.walk_in_timer / self.walk_in_duration)
         progress = min(1.0, max(0.0, progress))
@@ -1436,16 +1538,16 @@ class GameplayScreen(BaseScreen):
         self.walk_in_p1_x = self.walk_in_p1_start_x + (self.walk_in_p1_end_x - self.walk_in_p1_start_x) * eased_progress
         self.walk_in_p2_x = self.walk_in_p2_start_x + (self.walk_in_p2_end_x - self.walk_in_p2_start_x) * eased_progress
 
-        # Hide players that have walk-in animations (Jazzy, Biggie, Prissy, Rex, Dash)
+        # Hide players that have walk-in animations
         # They're rendered via walk-in animation sprite instead
         if self.player1:
-            if self.walk_in_p1_is_jazzy or self.walk_in_p1_is_biggie or self.walk_in_p1_is_prissy or self.walk_in_p1_is_rex or self.walk_in_p1_is_dash or self.walk_in_p1_is_snowy:
+            if self.walk_in_p1_is_jazzy or self.walk_in_p1_is_biggie or self.walk_in_p1_is_prissy or self.walk_in_p1_is_rex or self.walk_in_p1_is_dash or self.walk_in_p1_is_snowy or self.walk_in_p1_is_custom:
                 self.player1.x = -1000  # Hide, we render walk-in sprite instead
             else:
                 self.player1.x = self.walk_in_p1_end_x  # Show at final position
 
         if self.player2:
-            if self.walk_in_p2_is_jazzy or self.walk_in_p2_is_biggie or self.walk_in_p2_is_prissy or self.walk_in_p2_is_rex or self.walk_in_p2_is_dash or self.walk_in_p2_is_snowy:
+            if self.walk_in_p2_is_jazzy or self.walk_in_p2_is_biggie or self.walk_in_p2_is_prissy or self.walk_in_p2_is_rex or self.walk_in_p2_is_dash or self.walk_in_p2_is_snowy or self.walk_in_p2_is_custom:
                 self.player2.x = -1000  # Hide, we render walk-in sprite instead
             else:
                 self.player2.x = self.walk_in_p2_end_x  # Show at final position
@@ -1501,6 +1603,11 @@ class GameplayScreen(BaseScreen):
         """Start the actual round."""
         self.round_timer = self.round_duration
         self.round_active = True
+        self.crowd_chaos_triggered = False
+        self.crowd_chaos_active = False
+        self.crowd_chaos_countdown_active = False
+        self.crowd_chaos_countdown_timer = 0.0
+        self.crowd_chaos_countdown_value = 0
         self.player1.reset()
         self.player2.reset()
         self.arena1.snacks.clear()
@@ -1514,44 +1621,89 @@ class GameplayScreen(BaseScreen):
         self.player1.y = self.arena1.bounds.bottom - ground_offset
         self.player2.y = self.arena2.bounds.bottom - ground_offset
 
-        # Configure voting for this round
+        # Configure the single Crowd Chaos voting type for this round
         if self.voting_system:
-             if self.current_round == 1:
-                 # Round 1: Vote for a treat
-                 # Pick 3 random snacks from config (exclude pizza if possible to be interesting)
-                 possible_snacks = [s for s in self.snack_configs]
-                 if len(possible_snacks) > 3:
-                     choices = random.sample(possible_snacks, 3)
-                 else:
-                     choices = possible_snacks
-                 
-                 # Use ID as option
-                 options = [s.get("id", "snack") for s in choices]
-                 self.voting_system.set_mode(VotingMode.TREAT, options)
-                 
-                 if self.chat_simulator:
-                     self.chat_simulator.add_message("System", "ROUND 1: VOTE TREATS", (255, 255, 100))
-                 
-             elif self.current_round == 2:
-                 # Round 2: Action - Yank or Extend
-                 self.voting_system.set_mode(VotingMode.ACTION, ["extend", "yank"])
-                 if self.chat_simulator:
-                     self.chat_simulator.add_message("System", "ROUND 2: YANK/EXTEND", (255, 255, 100))
-                 
-             elif self.current_round >= 3:
-                 # Round 3: Trivia
-                 trivias = [
-                     {"q": "Who loves lasagna?", "a": "Jazzy", "opts": ["Jazzy", "Biggie", "Prissy", "Snowy"]},
-                     {"q": "What falls from sky?", "a": "Snacks", "opts": ["Snacks", "Rain", "Cats", "Rocks"]},
-                     {"q": "Best pizza topping?", "a": "Cheese", "opts": ["Cheese", "Pineapple", "Anchovy", "Olives"]},
-                     {"q": "Game Name?", "a": "SnackAttack", "opts": ["SnackAttack", "DogRun", "EatFast", "Fetch Master"]}
-                 ]
-                 trivia = random.choice(trivias)
-                 self.current_trivia_question = trivia["q"] # Store for display if we want
-                 self.voting_system.set_mode(VotingMode.TRIVIA, trivia["opts"], correct_answer=trivia["a"])
-                 
-                 if self.chat_simulator:
-                     self.chat_simulator.add_message("System", f"TRIVIA: {trivia['q']}", (255, 200, 255))
+            if self.current_round == 1:
+                # Round 1: Vote for a treat drop
+                possible_snacks = [s for s in self.snack_configs]
+                if len(possible_snacks) > 3:
+                    choices = random.sample(possible_snacks, 3)
+                else:
+                    choices = possible_snacks
+
+                self.crowd_chaos_mode = VotingMode.TREAT
+                self.crowd_chaos_options = [s.get("id", "snack") for s in choices]
+                self.crowd_chaos_correct_answer = None
+
+                if self.chat_simulator:
+                    self.chat_simulator.add_message("System", "R1 CHAOS: TREAT VOTE", (255, 255, 100))
+
+            elif self.current_round == 2:
+                # Round 2: Action vote - Yank vs Extend
+                self.crowd_chaos_mode = VotingMode.ACTION
+                self.crowd_chaos_options = ["extend", "yank"]
+                self.crowd_chaos_correct_answer = None
+
+                if self.chat_simulator:
+                    self.chat_simulator.add_message("System", "R2 CHAOS: YANK/EXTEND", (255, 255, 100))
+
+            else:
+                # Round 3: Trivia
+                trivias = [
+                    {"q": "Who loves lasagna?", "a": "Jazzy", "opts": ["Jazzy", "Biggie", "Prissy", "Snowy"]},
+                    {"q": "What falls from sky?", "a": "Snacks", "opts": ["Snacks", "Rain", "Cats", "Rocks"]},
+                    {"q": "Best pizza topping?", "a": "Cheese", "opts": ["Cheese", "Pineapple", "Anchovy", "Olives"]},
+                    {"q": "Game Name?", "a": "SnackAttack", "opts": ["SnackAttack", "DogRun", "EatFast", "Fetch Master"]}
+                ]
+                trivia = random.choice(trivias)
+                self.current_trivia_question = trivia["q"]
+                self.crowd_chaos_mode = VotingMode.TRIVIA
+                self.crowd_chaos_options = trivia["opts"]
+                self.crowd_chaos_correct_answer = trivia["a"]
+
+                if self.chat_simulator:
+                    self.chat_simulator.add_message("System", "R3 CHAOS: TRIVIA", (255, 200, 255))
+
+            self.voting_system.set_mode(
+                self.crowd_chaos_mode,
+                self.crowd_chaos_options,
+                correct_answer=self.crowd_chaos_correct_answer,
+                activate=False,
+                single_vote_mode=True,
+            )
+
+    def _start_crowd_chaos_countdown(self) -> None:
+        """Start the on-screen Crowd Chaos countdown."""
+        if self.crowd_chaos_triggered or self.crowd_chaos_countdown_active:
+            return
+
+        self.crowd_chaos_countdown_active = True
+        self.crowd_chaos_countdown_timer = self.crowd_chaos_countdown_duration
+        self.crowd_chaos_countdown_value = int(self.crowd_chaos_countdown_duration)
+
+        if self.chat_simulator:
+            self.chat_simulator.add_message("System", "CROWD CHAOS INCOMING!", (255, 120, 120))
+
+    def _activate_crowd_chaos(self) -> None:
+        """Activate the Crowd Chaos voting event for the round."""
+        if self.crowd_chaos_triggered:
+            return
+
+        self.crowd_chaos_triggered = True
+        self.crowd_chaos_countdown_active = False
+        self.crowd_chaos_active = True
+
+        if self.voting_system:
+            self.voting_system.start_voting_window()
+
+        if self.chat_simulator:
+            if self.crowd_chaos_mode == VotingMode.TRIVIA and self.current_trivia_question:
+                self.chat_simulator.add_message("System", f"TRIVIA: {self.current_trivia_question}", (255, 200, 255))
+            self.chat_simulator.add_message("System", "CROWD CHAOS LIVE! VOTE NOW", (255, 120, 120))
+
+        self.announcement_text = "CROWD CHAOS!"
+        self.announcement_color = (255, 100, 100)
+        self.announcement_timer = min(1.5, self.announcement_duration)
 
     def _end_round(self) -> None:
         """End the current round."""
@@ -1609,15 +1761,46 @@ class GameplayScreen(BaseScreen):
             "p2_name": self.player2.name
         })
 
+    def _start_storm_intro(self) -> None:
+        """Launch the lightning + treat storm intro before the countdown."""
+        self.storm_intro = StormIntroSequence(
+            self.game_area_width, self.screen_height
+        )
+        # Use the first arena's ground level as reference
+        ground_y = self.screen_height * 0.7
+        if self.arena1:
+            ground_y = self.arena1.bounds.bottom - 80
+
+        # Grab idle frame from each player's animation controller
+        dog1_sprite = None
+        dog2_sprite = None
+        if self.player1:
+            dog1_sprite = self.player1.animation_controller.get_current_sprite()
+        if self.player2:
+            dog2_sprite = self.player2.animation_controller.get_current_sprite()
+
+        self.storm_intro.start(
+            dog1_sprite=dog1_sprite,
+            dog2_sprite=dog2_sprite,
+            dog_ground_y=ground_y,
+        )
+        self.storm_intro_active = True
+
     def on_exit(self) -> None:
         """Clean up when leaving gameplay."""
         # Stop Twitch connection if active
         if self.twitch_manager:
             self.twitch_manager.stop()
             self.twitch_manager = None
+        self.storm_intro = None
+        self.storm_intro_active = False
 
     def handle_event(self, event: pygame.event.Event) -> None:
         """Handle input events."""
+        # Block gameplay input while storm intro is playing
+        if self.storm_intro_active:
+            return
+
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 if self.paused:
@@ -1646,7 +1829,17 @@ class GameplayScreen(BaseScreen):
             voter_id = event.voter_id
             if self.voting_system and self.voting_system.add_vote(vote_type, voter_id):
                 # Show in chat simulator
-                color = (50, 200, 50) if vote_type == "extend" else (200, 50, 50)
+                palette = [
+                    (81, 180, 71),
+                    (221, 68, 61),
+                    (80, 160, 220),
+                    (220, 180, 60),
+                ]
+                color = (200, 200, 200)
+                for idx, opt in enumerate(self.voting_system.options):
+                    if opt.lower() == vote_type.lower():
+                        color = palette[idx % len(palette)]
+                        break
                 if self.chat_simulator:
                     self.chat_simulator.add_message(voter_id[:10], f"!{vote_type}", color)
 
@@ -1695,6 +1888,15 @@ class GameplayScreen(BaseScreen):
     def update(self, dt: float) -> None:
         """Update gameplay state."""
         if self.paused:
+            return
+
+        # Update storm intro if active
+        if self.storm_intro_active and self.storm_intro:
+            self.storm_intro.update(dt)
+            if self.storm_intro.is_complete:
+                self.storm_intro_active = False
+                self.storm_intro = None
+                self._start_countdown()
             return
 
         # --- Jazzy's Chili Sequence Logic ---
@@ -1767,6 +1969,26 @@ class GameplayScreen(BaseScreen):
             self._end_round()
             return
 
+        # Trigger one Crowd Chaos event at 40s elapsed in each round
+        elapsed_in_round = self.round_duration - self.round_timer
+        if (not self.crowd_chaos_triggered
+                and not self.crowd_chaos_countdown_active
+                and elapsed_in_round >= self.crowd_chaos_trigger_elapsed):
+            self._start_crowd_chaos_countdown()
+
+        # Update Crowd Chaos countdown overlay
+        if self.crowd_chaos_countdown_active:
+            self.crowd_chaos_countdown_timer -= dt
+            if self.crowd_chaos_countdown_timer <= 0:
+                self._activate_crowd_chaos()
+            else:
+                self.crowd_chaos_countdown_value = max(1, int(self.crowd_chaos_countdown_timer) + 1)
+
+        # Smoothly animate chaos tint strength
+        chaos_visual_active = self.crowd_chaos_countdown_active or self.crowd_chaos_active
+        target_alpha = float(self.crowd_chaos_tint_max_alpha if chaos_visual_active else 0)
+        self.crowd_chaos_tint_alpha += (target_alpha - self.crowd_chaos_tint_alpha) * min(1.0, dt * 6.0)
+
         # Update screen shake
         if self.shake_duration > 0:
             self.shake_duration -= dt
@@ -1794,6 +2016,10 @@ class GameplayScreen(BaseScreen):
             vote_winner = self.voting_system.update(dt)
             if vote_winner:
                 self._apply_vote_effect(vote_winner)
+
+            # Single chaos vote per round: stop chaos visuals once vote cycle is fully finished
+            if self.crowd_chaos_active and self.voting_system.single_vote_completed:
+                self.crowd_chaos_active = False
 
         # Update chat simulator (auto-voting)
         if self.chat_simulator and self.voting_system:
@@ -2003,6 +2229,11 @@ class GameplayScreen(BaseScreen):
 
     def render(self, surface: pygame.Surface) -> None:
         """Render the gameplay screen to 800x800 display."""
+        # Render storm intro fullscreen if active
+        if self.storm_intro_active and self.storm_intro:
+            self.storm_intro.render(surface)
+            return
+
         if self.background_image:
             surface.blit(self.background_image, (0, 0))
         else:
@@ -2090,6 +2321,10 @@ class GameplayScreen(BaseScreen):
         if self.announcement_timer > 0:
             self._render_announcement(surface)
 
+        # Draw crowd chaos overlays
+        self._render_crowd_chaos_tint(surface)
+        self._render_crowd_chaos_overlay(surface)
+
         # Draw countdown
         if self.countdown > 0:
             self._render_countdown(surface)
@@ -2115,6 +2350,62 @@ class GameplayScreen(BaseScreen):
             overlay.fill((255, 0, 0))
             overlay.set_alpha(30) # Slight red tint
             surface.blit(overlay, (0, 0))
+
+    def _render_crowd_chaos_tint(self, surface: pygame.Surface) -> None:
+        """Render a subtle red color shift during Crowd Chaos countdown/event."""
+        if self.crowd_chaos_tint_alpha <= 1:
+            return
+
+        pulse = 0.85 + 0.15 * abs(pygame.time.get_ticks() % 500 - 250) / 250
+        alpha = int(self.crowd_chaos_tint_alpha * pulse)
+        alpha = max(0, min(140, alpha))
+
+        if alpha <= 0:
+            return
+
+        tint_surface = pygame.Surface((self.game_area_width, self.screen_height), pygame.SRCALPHA)
+        tint_surface.fill((220, 40, 40, alpha))
+        surface.blit(tint_surface, (0, 0))
+
+    def _render_crowd_chaos_overlay(self, surface: pygame.Surface) -> None:
+        """Render countdown and live-chaos labels to clearly communicate the event."""
+        center_x = self.game_area_width // 2
+
+        title_font = self.daydream_font_small if self.daydream_font_small else self.menu_font
+        value_font = self.daydream_font if self.daydream_font else self.title_font
+        helper_font = self.daydream_font_tiny if self.daydream_font_tiny else self.small_font
+
+        if self.crowd_chaos_countdown_active:
+            title = "CROWD CHAOS IN"
+            title_surf = title_font.render(title, True, (255, 235, 235))
+            title_rect = title_surf.get_rect(center=(center_x, 300))
+            surface.blit(title_surf, title_rect)
+
+            pulse_scale = 1.0 + 0.08 * abs(pygame.time.get_ticks() % 400 - 200) / 200
+            number = str(max(1, self.crowd_chaos_countdown_value))
+            number_surf = value_font.render(number, True, (255, 110, 110))
+            if pulse_scale != 1.0:
+                number_surf = pygame.transform.smoothscale(
+                    number_surf,
+                    (
+                        max(1, int(number_surf.get_width() * pulse_scale)),
+                        max(1, int(number_surf.get_height() * pulse_scale)),
+                    ),
+                )
+            number_rect = number_surf.get_rect(center=(center_x, 350))
+            surface.blit(number_surf, number_rect)
+
+        elif self.crowd_chaos_active and self.voting_system:
+            status = "CROWD CHAOS LIVE"
+            status_surf = title_font.render(status, True, (255, 180, 180))
+            status_rect = status_surf.get_rect(center=(center_x, 300))
+            surface.blit(status_surf, status_rect)
+
+            options = "   ".join([f"!{opt}" for opt in self.voting_system.options[:4]])
+            if options:
+                options_surf = helper_font.render(options, True, (255, 230, 200))
+                options_rect = options_surf.get_rect(center=(center_x, 330))
+                surface.blit(options_surf, options_rect)
 
     def _render_header(self, surface: pygame.Surface) -> None:
         """Render the game header (score and round info on menu bar)."""
@@ -2586,6 +2877,31 @@ class GameplayScreen(BaseScreen):
         if self.walk_in_p2_is_snowy and self.walk_in_snowy_frames_left and self.arena2:
             frame_index = self.walk_in_snowy_frame_index % len(self.walk_in_snowy_frames_left)
             walk_sprite = self.walk_in_snowy_frames_left[frame_index]
+            walk_sprite_height = walk_sprite.get_height()
+            walk_sprite_width = walk_sprite.get_width()
+            x_center_offset = (player_width - walk_sprite_width) // 2
+            player_feet_y = self.arena2.bounds.bottom - player_ground_offset + player_height
+            p2_render_y = int(player_feet_y - walk_sprite_height) + y_offset
+            p2_render_x = int(self.walk_in_p2_x) + x_center_offset
+            surface.blit(walk_sprite, (p2_render_x, p2_render_y))
+
+        # Render custom character walk-in
+        # Player 1 side (facing right)
+        if self.walk_in_p1_is_custom and self.walk_in_custom_frames and self.arena1:
+            frame_index = self.walk_in_custom_frame_index % len(self.walk_in_custom_frames)
+            walk_sprite = self.walk_in_custom_frames[frame_index]
+            walk_sprite_height = walk_sprite.get_height()
+            walk_sprite_width = walk_sprite.get_width()
+            x_center_offset = (player_width - walk_sprite_width) // 2
+            player_feet_y = self.arena1.bounds.bottom - player_ground_offset + player_height
+            p1_render_y = int(player_feet_y - walk_sprite_height) + y_offset
+            p1_render_x = int(self.walk_in_p1_x) + x_center_offset
+            surface.blit(walk_sprite, (p1_render_x, p1_render_y))
+
+        # Player 2 side (facing left, walking from right)
+        if self.walk_in_p2_is_custom and self.walk_in_custom_frames_left and self.arena2:
+            frame_index = self.walk_in_custom_frame_index % len(self.walk_in_custom_frames_left)
+            walk_sprite = self.walk_in_custom_frames_left[frame_index]
             walk_sprite_height = walk_sprite.get_height()
             walk_sprite_width = walk_sprite.get_width()
             x_center_offset = (player_width - walk_sprite_width) // 2

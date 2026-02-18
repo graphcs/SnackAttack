@@ -13,6 +13,8 @@ from .screens.gameplay import GameplayScreen
 from .screens.treat_attack_gameplay import TreatAttackGameplay
 from .screens.settings import SettingsScreen
 from .screens.game_over import GameOverScreen
+from .screens.upload_avatar import UploadAvatarScreen
+from .screens.avatar_showcase import AvatarShowcaseScreen
 from .audio.audio_manager import AudioManager
 
 
@@ -33,6 +35,10 @@ class Game:
         # Get the directory where this file is located
         self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         config_dir = os.path.join(self.base_dir, "config")
+
+        # Load environment variables (for API keys)
+        from .core.env_loader import load_env
+        load_env()
 
         # Initialize core systems
         self.config = ConfigManager()
@@ -114,6 +120,8 @@ class Game:
         treat_attack = TreatAttackGameplay(self.state_machine, self.config, self.event_bus)
         settings = SettingsScreen(self.state_machine, self.config, self.event_bus)
         game_over = GameOverScreen(self.state_machine, self.config, self.event_bus)
+        upload_avatar = UploadAvatarScreen(self.state_machine, self.config, self.event_bus)
+        avatar_showcase = AvatarShowcaseScreen(self.state_machine, self.config, self.event_bus)
 
         # Register screens with state machine
         self.state_machine.register_state(GameState.MAIN_MENU, main_menu)
@@ -122,6 +130,8 @@ class Game:
         self.state_machine.register_state(GameState.TREAT_ATTACK, treat_attack)
         self.state_machine.register_state(GameState.SETTINGS, settings)
         self.state_machine.register_state(GameState.GAME_OVER, game_over)
+        self.state_machine.register_state(GameState.UPLOAD_AVATAR, upload_avatar)
+        self.state_machine.register_state(GameState.AVATAR_SHOWCASE, avatar_showcase)
 
         # Start at main menu
         self.state_machine.change_state(GameState.MAIN_MENU)

@@ -35,6 +35,9 @@ class SpriteSheetLoader:
         'prissy': (173, 173),  # 0.8x of 216
     }
 
+    # Custom/generated characters use this size (slightly smaller to match built-ins)
+    CUSTOM_CHARACTER_SIZE = (163, 163)
+
     # Animation timing (in seconds)
     RUN_FRAME_DURATION = 0.1      # 10 FPS for run cycle
     EAT_FRAME_DURATION = 0.12     # Slightly slower for eat
@@ -88,6 +91,45 @@ class SpriteSheetLoader:
         self._profile_path = self._get_profile_path()
         self._food_path = self._get_food_path()
 
+        # Load custom character mappings from config
+        self._load_custom_characters()
+
+    def _load_custom_characters(self):
+        """Load custom character mappings from characters.json config."""
+        try:
+            config_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                '..', '..', 'config', 'characters.json'
+            )
+            if os.path.exists(config_path):
+                import json
+                with open(config_path, 'r') as f:
+                    data = json.load(f)
+                characters = data.get('characters', [])
+                for char_data in characters:
+                    char_id = char_data.get('id', '')
+                    if char_data.get('custom', False) and char_id and char_id not in self.CHARACTER_NAMES:
+                        display_name = char_data.get('display_name', char_id.capitalize())
+                        self.CHARACTER_NAMES[char_id] = display_name
+                        # Custom characters get a smaller size to match built-ins
+                        if char_id not in self.CHARACTER_SIZES:
+                            self.CHARACTER_SIZES[char_id] = self.CUSTOM_CHARACTER_SIZE
+        except Exception as e:
+            print(f"[SpriteSheetLoader] Warning: Could not load custom characters: {e}")
+
+    def register_custom_character(self, character_id: str, display_name: str):
+        """Register a custom character for sprite loading at runtime."""
+        self.CHARACTER_NAMES[character_id] = display_name
+        # Custom characters get a smaller size to match built-ins
+        if character_id not in self.CHARACTER_SIZES:
+            self.CHARACTER_SIZES[character_id] = self.CUSTOM_CHARACTER_SIZE
+        # Clear any cached entries for this character so they reload
+        keys_to_remove = [k for k in self._animation_cache if k[0] == character_id]
+        for k in keys_to_remove:
+            del self._animation_cache[k]
+        if character_id in self._portrait_cache:
+            del self._portrait_cache[character_id]
+
     def _get_sprite_path(self) -> str:
         """Get the path to sprite sheets folder."""
         # Navigate from src/sprites/ to Sprite sheets/
@@ -128,6 +170,87 @@ class SpriteSheetLoader:
             return f"{name} chili reaction sprite.png"
 
         return f"{name} run sprite.png"  # Fallback
+
+    def _get_boost_sheet_path(self, character_id: str, animation_type: str) -> Optional[str]:
+        """Get path to generated boost-wing sprite sheet for run/eat animations."""
+        if animation_type not in ('run', 'eat'):
+            return None
+
+        name = self.CHARACTER_NAMES.get(character_id, character_id.capitalize())
+        boost_dir = os.path.join(self._sprite_path, 'boost_wings')
+
+        if animation_type == 'run':
+            candidates = [
+                os.path.join(boost_dir, f"{name} boost run sprite.png"),
+                os.path.join(boost_dir, f"{name} run boost sprite.png"),
+            ]
+        else:
+            candidates = [
+                os.path.join(boost_dir, f"{name} boost eat:attack sprite.png"),
+                os.path.join(boost_dir, f"{name} boost eat:attack.png"),
+            ]
+
+        # Custom avatar fallback location
+        custom_base = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), '..', '..', 'custom_avatars', character_id
+        )
+        if animation_type == 'run':
+            candidates.extend([
+                os.path.join(custom_base, 'boost_run_sprite.png'),
+                os.path.join(custom_base, 'run_boost_sprite.png'),
+            ])
+        else:
+            candidates.extend([
+                os.path.join(custom_base, 'boost_eat_sprite.png'),
+                os.path.join(custom_base, 'eat_boost_sprite.png'),
+            ])
+
+        for path in candidates:
+            if os.path.exists(path):
+                return path
+        return None
+
+    def _get_boost_sprite_path(self, character_id: str) -> Optional[str]:
+        """Get path to generated single boost-wing sprite image."""
+        name = self.CHARACTER_NAMES.get(character_id, character_id.capitalize())
+        boost_dir = os.path.join(self._sprite_path, 'boost_wings')
+
+        candidates = [
+            os.path.join(boost_dir, f"{name} boost.png"),
+            os.path.join(boost_dir, f"{name} winged boost.png"),
+        ]
+
+        custom_base = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), '..', '..', 'custom_avatars', character_id
+        )
+        candidates.extend([
+            os.path.join(custom_base, 'boost.png'),
+            os.path.join(custom_base, 'boost_sprite.png'),
+        ])
+
+        for path in candidates:
+            if os.path.exists(path):
+                return path
+
+        # Flexible filename matching (e.g. "Jazzy boost-Photoroom.png", "Snowy boost-Photoroom (1).png")
+        if os.path.isdir(boost_dir):
+            normalized_name = name.lower()
+            dynamic_matches: List[str] = []
+            for filename in os.listdir(boost_dir):
+                lower = filename.lower()
+                if not lower.endswith('.png'):
+                    continue
+                if normalized_name not in lower:
+                    continue
+                if 'boost' not in lower:
+                    continue
+                dynamic_matches.append(os.path.join(boost_dir, filename))
+
+            if dynamic_matches:
+                dynamic_matches.sort()
+                return dynamic_matches[0]
+
+        return None
 
     def _load_sprite_sheet(self, filepath: str) -> Optional[pygame.Surface]:
         """Load a sprite sheet image."""
@@ -235,6 +358,65 @@ class SpriteSheetLoader:
             self._animation_cache[opposite_key] = opposite_frames
 
         return frames
+
+    def get_boost_animation_frames(self, character_id: str, animation_type: str,
+                                   facing_right: bool = True) -> List[pygame.Surface]:
+        """Get boost-wing animation frames for run/eat. Returns [] if not available."""
+        cache_key = (character_id, f'boost_{animation_type}', facing_right)
+        if cache_key in self._animation_cache:
+            return self._animation_cache[cache_key]
+
+        filepath = self._get_boost_sheet_path(character_id, animation_type)
+        if not filepath:
+            return []
+
+        sheet = self._load_sprite_sheet(filepath)
+        if sheet is None:
+            return []
+
+        frames = self._extract_frames(sheet)
+        target_size = self.CHARACTER_SIZES.get(character_id, self.GAMEPLAY_SIZE)
+        frames = self._scale_frames(frames, target_size)
+
+        if not facing_right:
+            frames = self._flip_frames(frames)
+
+        self._animation_cache[cache_key] = frames
+
+        opposite_key = (character_id, f'boost_{animation_type}', not facing_right)
+        if opposite_key not in self._animation_cache:
+            self._animation_cache[opposite_key] = self._flip_frames(frames)
+
+        return frames
+
+    def get_boost_sprite(self, character_id: str,
+                         facing_right: bool = True) -> Optional[pygame.Surface]:
+        """Get single boost-wing sprite image. Returns None if not available."""
+        cache_key = (character_id, 'boost_single', facing_right)
+        if cache_key in self._animation_cache:
+            frames = self._animation_cache[cache_key]
+            return frames[0] if frames else None
+
+        filepath = self._get_boost_sprite_path(character_id)
+        if not filepath:
+            return None
+
+        sprite = self._load_sprite_sheet(filepath)
+        if sprite is None:
+            return None
+
+        target_size = self.CHARACTER_SIZES.get(character_id, self.GAMEPLAY_SIZE)
+        sprite = pygame.transform.smoothscale(sprite, target_size)
+
+        if not facing_right:
+            sprite = pygame.transform.flip(sprite, True, False)
+
+        self._animation_cache[cache_key] = [sprite]
+        opposite_key = (character_id, 'boost_single', not facing_right)
+        if opposite_key not in self._animation_cache:
+            self._animation_cache[opposite_key] = [pygame.transform.flip(sprite, True, False)]
+
+        return sprite
 
     def get_portrait(self, character_id: str) -> Optional[pygame.Surface]:
         """Get portrait image for character select screen."""
@@ -365,7 +547,24 @@ class SpriteSheetLoader:
         sheet_width = sheet.get_width()
         sheet_height = sheet.get_height()
 
-        if character_id == 'prissy':
+        # Check if this is a custom character (horizontal strip format)
+        is_custom = character_id not in ('jazzy', 'biggie', 'prissy', 'snowy', 'rex', 'dash')
+
+        if is_custom:
+            # Custom characters use a simple horizontal strip (auto-detect frame count)
+            # If width > 3x height, assume multiple frames side by side
+            aspect = sheet_width / max(sheet_height, 1)
+            cols = max(1, round(aspect))
+            frame_width = sheet_width // cols
+            frame_height = sheet_height
+
+            frames = []
+            for col in range(cols):
+                x = col * frame_width
+                frame_rect = pygame.Rect(x, 0, frame_width, frame_height)
+                frame = sheet.subsurface(frame_rect).copy()
+                frames.append(frame)
+        elif character_id == 'prissy':
             # Prissy walking sprite is a 3x2 grid (6 frames total)
             cols = 3
             rows = 2

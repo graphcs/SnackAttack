@@ -7,6 +7,7 @@ from ..core.state_machine import GameState
 from ..core.event_bus import GameEvent
 from ..entities.falling_treat import FallingTreat, TreatSpawner
 from ..entities.catcher_dog import CatcherDog, LeashState
+from ..effects.storm_intro import StormIntroSequence
 
 
 class VotingMeter:
@@ -210,6 +211,10 @@ class TreatAttackGameplay(BaseScreen):
         # Chat input
         self.chat_input: Optional[ChatInput] = None
 
+        # Storm intro sequence
+        self.intro_sequence: Optional[StormIntroSequence] = None
+        self.intro_active = False
+
         # UI fonts
         self.score_font: Optional[pygame.font.Font] = None
         self.timer_font: Optional[pygame.font.Font] = None
@@ -289,14 +294,30 @@ class TreatAttackGameplay(BaseScreen):
         self.score_font = pygame.font.Font(None, ui.get("score_font_size", 32))
         self.timer_font = pygame.font.Font(None, ui.get("timer_font_size", 28))
 
+        # Start the storm intro sequence
+        self.intro_sequence = StormIntroSequence(self.game_width, self.game_height)
+        dog_sprite = self.dog._get_animation_controller().get_current_sprite() if self.dog else None
+        self.intro_sequence.start(
+            dog_sprite=dog_sprite,
+            dog_target_x=self.dog.x if self.dog else 300.0,
+            dog_ground_y=self.dog.ground_y if self.dog else 650.0,
+        )
+        self.intro_active = True
+
     def on_exit(self) -> None:
         """Cleanup when leaving the screen."""
         self.treats = []
         self.dog = None
         self.spawner = None
+        self.intro_sequence = None
+        self.intro_active = False
 
     def handle_event(self, event: pygame.event.Event) -> None:
         """Handle input events."""
+        # Block gameplay input while intro is playing
+        if self.intro_active:
+            return
+
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 if self.game_over:
@@ -338,6 +359,13 @@ class TreatAttackGameplay(BaseScreen):
 
     def update(self, dt: float) -> None:
         """Update game state."""
+        # Update intro sequence if active
+        if self.intro_active and self.intro_sequence:
+            self.intro_sequence.update(dt)
+            if self.intro_sequence.is_complete:
+                self.intro_active = False
+            return
+
         if self.game_over or self.paused:
             return
 
@@ -417,6 +445,15 @@ class TreatAttackGameplay(BaseScreen):
         """Render the game."""
         # Create game surface (720x720)
         game_surface = pygame.Surface((self.game_width, self.game_height))
+
+        # Render intro sequence if active
+        if self.intro_active and self.intro_sequence:
+            self.intro_sequence.render(game_surface)
+            x_offset = (surface.get_width() - self.game_width) // 2
+            y_offset = (surface.get_height() - self.game_height) // 2
+            surface.fill((0, 0, 0))
+            surface.blit(game_surface, (x_offset, y_offset))
+            return
 
         # Background (sky gradient effect)
         self._draw_background(game_surface)
