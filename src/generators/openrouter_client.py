@@ -54,7 +54,7 @@ class OpenRouterClient:
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://snackattack.game",
-            "X-Title": "Jazzy's Snack Attack",
+            "X-Title": "Jazzy's Treat Storm",
         }
 
     def _make_request(self, payload: Dict[str, Any], timeout: int = 120,
