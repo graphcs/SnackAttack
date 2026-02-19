@@ -30,17 +30,18 @@ class FallingSnack:
     """A snack that falls from the top of the arena."""
 
     def __init__(self, snack_config: Dict[str, Any], x: float, arena_bounds: pygame.Rect,
-                 fall_speed: float = 120, ground_y: float = None):
+                 fall_speed: float = 120, ground_y: float = None, scale: float = 1.0):
         self.snack_id = snack_config.get("id", "pizza")
         self.name = snack_config.get("name", "Snack")
         self.point_value = snack_config.get("point_value", 100)
         self.effect = snack_config.get("effect")
         self.color = tuple(snack_config.get("color", [255, 255, 255]))
+        self.scale = scale  # Scale multiplier for size
 
-        # Use larger size from sprite loader
+        # Use larger size from sprite loader, scaled
         from ..sprites.sprite_sheet_loader import SpriteSheetLoader
-        self.width = SpriteSheetLoader.FOOD_SIZE[0]
-        self.height = SpriteSheetLoader.FOOD_SIZE[1]
+        self.width = int(SpriteSheetLoader.FOOD_SIZE[0] * scale)
+        self.height = int(SpriteSheetLoader.FOOD_SIZE[1] * scale)
 
         self.arena_bounds = arena_bounds
         self.x = x
@@ -110,6 +111,11 @@ class FallingSnack:
             cache = SpriteCache()
             sprite = cache.get_snack_sprite(self.snack_id)
 
+        # Scale sprite if scale factor is not 1.0
+        if self.scale != 1.0:
+            scaled_size = (self.width, self.height)
+            sprite = pygame.transform.scale(sprite, scaled_size)
+
         # Rotate the sprite
         rotated_sprite = pygame.transform.rotate(sprite, self.rotation_angle)
         # Center the rotated sprite at the original position
@@ -161,6 +167,14 @@ class Arena:
         ]
         self.pending_snack: Optional[Dict[str, Any]] = None
         self.pending_snack_x: float = 0
+        self.pending_snack_scale: float = 1.0  # Scale for voted snacks
+        
+        # Voted food spawning phase (pause regular spawning, spawn voted food only)
+        self.voted_food_active = False
+        self.voted_food_timer = 0.0
+        self.voted_food_duration = 5.0  # Duration to spawn voted food
+        self.voted_food_config: Optional[Dict[str, Any]] = None
+        self.voted_food_spawn_interval = 0.3  # Spawn voted food frequently
 
         # Load thunder sound effect
         self.thunder_sound: Optional[pygame.mixer.Sound] = None
@@ -275,9 +289,10 @@ class Arena:
             return None
 
         snack = FallingSnack(self.pending_snack, self.pending_snack_x, self.bounds,
-                            self.fall_speed, self.ground_y)
+                            self.fall_speed, self.ground_y, scale=self.pending_snack_scale)
         self.snacks.append(snack)
         self.pending_snack = None
+        self.pending_snack_scale = 1.0  # Reset scale for next snack
         return snack
 
     def update(self, dt: float, snack_configs: List[Dict[str, Any]]) -> None:
@@ -296,7 +311,27 @@ class Arena:
 
         # Update spawn timer
         self.spawn_timer -= dt
-        if self.spawn_timer <= 0:
+        
+        # Handle voted food spawning phase
+        if self.voted_food_active:
+            self.voted_food_timer -= dt
+            if self.voted_food_timer <= 0:
+                # Voted food phase ended, return to normal spawning
+                self.voted_food_active = False
+                self.voted_food_config = None
+                self.spawn_timer = 0  # Trigger immediate spawn
+            else:
+                # Spawn voted food frequently during this phase
+                self.spawn_timer -= dt
+                if self.spawn_timer <= 0 and self.voted_food_config:
+                    snack = FallingSnack(self.voted_food_config, 
+                                       random.uniform(self.bounds.left + 50, self.bounds.right - 50),
+                                       self.bounds, self.fall_speed, self.ground_y, 
+                                       scale=self.pending_snack_scale)
+                    self.snacks.append(snack)
+                    self.spawn_timer = self.voted_food_spawn_interval + random.uniform(-0.1, 0.1)
+        elif self.spawn_timer <= 0:
+            # Regular spawning
             self.spawn_snack(snack_configs)
             interval = self.base_spawn_interval / self.spawn_rate_multiplier
             self.spawn_timer = interval + random.uniform(-0.3, 0.3)
@@ -480,7 +515,7 @@ class VotingSystem:
         self.votes: Dict[str, List[str]] = {opt: [] for opt in self.options}
         self.voting_active = True
         self.voting_duration = 10.0  # seconds
-        self.cooldown_duration = 5.0  # seconds after effects are applied
+        self.cooldown_duration = 10.0  # seconds after effects are applied
         self.voting_timer = self.voting_duration
         self.cooldown_timer = 0.0
         self.last_winner: Optional[str] = None
@@ -922,7 +957,7 @@ class GameplayScreen(BaseScreen):
         self.countdown_timer = 0.0
 
         # Crowd Chaos timing (one event per round)
-        self.crowd_chaos_trigger_elapsed = 40.0
+        self.crowd_chaos_trigger_elapsed = 35.0
         self.crowd_chaos_countdown_duration = 5.0
         self.crowd_chaos_countdown_active = False
         self.crowd_chaos_countdown_timer = 0.0
@@ -2033,13 +2068,22 @@ class GameplayScreen(BaseScreen):
 
         # Update voting system
         if self.voting_system:
+            # Track if cooldown was active before update
+            was_in_cooldown = self.voting_system.cooldown_timer > 0
+            
             vote_winner = self.voting_system.update(dt)
             if vote_winner:
                 self._apply_vote_effect(vote_winner)
 
-            # Single chaos vote per round: stop chaos visuals once vote cycle is fully finished
-            if self.crowd_chaos_active and self.voting_system.single_vote_completed:
-                self.crowd_chaos_active = False
+            # Clear chaos effect after voting cycle completes
+            if self.crowd_chaos_active:
+                # Check if cooldown just finished (was > 0, now <= 0)
+                if was_in_cooldown and self.voting_system.cooldown_timer <= 0:
+                    self.crowd_chaos_active = False
+                    self.crowd_chaos_triggered = False
+                # Or if single vote mode completed
+                elif self.voting_system.single_vote_completed:
+                    self.crowd_chaos_active = False
 
         # Update chat simulator (auto-voting)
         if self.chat_simulator and self.voting_system:
@@ -2219,11 +2263,21 @@ class GameplayScreen(BaseScreen):
             if selected_snack:
                 self.arena1.pending_snack = selected_snack
                 self.arena1.pending_snack_x = self.arena1.bounds.centerx
+                self.arena1.pending_snack_scale = 1.5  # Make voted snacks 1.5x larger
                 self.arena1._trigger_lightning(self.arena1.pending_snack_x)
+                # Activate voted food spawning phase (spawn voted food for 5 seconds)
+                self.arena1.voted_food_active = True
+                self.arena1.voted_food_timer = self.arena1.voted_food_duration
+                self.arena1.voted_food_config = selected_snack
                 
                 self.arena2.pending_snack = selected_snack
                 self.arena2.pending_snack_x = self.arena2.bounds.centerx
+                self.arena2.pending_snack_scale = 1.5  # Make voted snacks 1.5x larger
                 self.arena2._trigger_lightning(self.arena2.pending_snack_x)
+                # Activate voted food spawning phase (spawn voted food for 5 seconds)
+                self.arena2.voted_food_active = True
+                self.arena2.voted_food_timer = self.arena2.voted_food_duration
+                self.arena2.voted_food_config = selected_snack
                 
                 self.announcement_text = f"{vote_winner.upper()} DROP!"
                 self.announcement_color = (100, 200, 255)
