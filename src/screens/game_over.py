@@ -134,12 +134,23 @@ class GameOverScreen(BaseScreen):
 
     def _start_background_music(self) -> None:
         """Start playing background music."""
+        audio_settings = self.config.get_config("audio_settings")
+        music_enabled = audio_settings.get("music_enabled", True)
+        if not music_enabled:
+            if pygame.mixer.get_init():
+                pygame.mixer.music.stop()
+            return
+
+        master_volume = audio_settings.get("master_volume", 0.8)
+        music_volume = audio_settings.get("music_volume", 0.6)
+        effective_volume = max(0.0, min(1.0, master_volume * music_volume))
+
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         music_path = os.path.join(base_dir, "Sound effect", "background.mp3")
         if os.path.exists(music_path):
             try:
                 pygame.mixer.music.load(music_path)
-                pygame.mixer.music.set_volume(0.5)
+                pygame.mixer.music.set_volume(effective_volume)
                 pygame.mixer.music.play(-1)  # Loop indefinitely
             except pygame.error as e:
                 print(f"Could not play background music: {e}")

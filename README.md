@@ -1,4 +1,4 @@
-# Jazzy's Snack Attack
+# Jazzy's Treat storm
 
 A retro-style 2D arcade game where players control dogs to collect snacks! Features split-screen gameplay with 1-player vs AI and 2-player local modes.
 

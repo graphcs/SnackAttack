@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Jazzy's Snack Attack is a retro-style 2D arcade game built with Pygame where players control dogs to collect snacks. Features split-screen gameplay (1P vs AI, 2P local), a Treat Attack mode, and Twitch chat integration for audience voting.
+Jazzy's Treat Storm is a retro-style 2D arcade game built with Pygame where players control dogs to collect snacks. Features split-screen gameplay (1P vs AI, 2P local), a Treat Attack mode, and Twitch chat integration for audience voting.
 
 ## Running the Project
 

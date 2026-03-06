@@ -1,4 +1,4 @@
-"""Pixel art sprite creation for Jazzy's Snack Attack - Detailed version."""
+"""Pixel art sprite creation for Jazzy's Treat Storm - Detailed version."""
 
 import pygame
 from typing import Dict, Tuple, Optional

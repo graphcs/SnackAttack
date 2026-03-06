@@ -1,2 +1,4 @@
 pygame>=2.5.0
 twitchio>=2.6.0,<3.0.0
+requests>=2.28.0
+Pillow>=9.0.0

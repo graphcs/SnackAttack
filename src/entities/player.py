@@ -6,6 +6,7 @@ from typing import Dict, Any, Tuple, Optional, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..sprites.animation_controller import AnimationController
+    from ..effects.powerup_vfx import PowerUpVFXManager
 
 
 class Player:
@@ -76,8 +77,11 @@ class Player:
         # Steam particles for chaos/chilli effect
         self.steam_particles: List[Dict[str, float]] = []
 
-        # Speed lines for boost effect
+        # Speed lines for boost effect (legacy — kept for compatibility)
         self.speed_lines: List[Dict[str, float]] = []
+
+        # Power-up visual effects manager (lazy initialization)
+        self._vfx_manager: Optional['PowerUpVFXManager'] = None
 
     @property
     def rect(self) -> pygame.Rect:
@@ -96,6 +100,16 @@ class Player:
             from ..sprites.animation_controller import AnimationController
             self._animation_controller = AnimationController(self.character_id)
         return self._animation_controller
+
+    @property
+    def vfx(self) -> 'PowerUpVFXManager':
+        """Lazy initialization of power-up VFX manager."""
+        if self._vfx_manager is None:
+            from ..effects.powerup_vfx import PowerUpVFXManager
+            from ..core.config_manager import ConfigManager
+            cfg = ConfigManager().get("powerup_visuals", {})
+            self._vfx_manager = PowerUpVFXManager(cfg)
+        return self._vfx_manager
 
     def trigger_eat_animation(self) -> None:
         """Trigger the eat/attack animation when collecting a snack."""
@@ -121,6 +135,18 @@ class Player:
         """Check if player has boost effect active."""
         return any(e["type"] == "boost" for e in self.active_effects)
 
+    def _get_boost_sprite_override(self) -> Optional[pygame.Surface]:
+        """Get single boost-wing sprite override, if available."""
+        if not self.has_boost_effect():
+            return None
+
+        from ..sprites.sprite_sheet_loader import SpriteSheetLoader
+
+        return SpriteSheetLoader().get_boost_sprite(
+            self.character_id,
+            self.facing_right,
+        )
+
     def apply_effect(self, effect_type: str, magnitude: float, duration: float) -> None:
         """Apply a power-up or penalty effect."""
         effect = {
@@ -135,6 +161,10 @@ class Player:
             self.is_invincible = True
         elif effect_type == "chaos":
             self.controls_flipped = True
+
+        # Trigger visual pickup flash at player centre
+        cx, cy = self.center
+        self.vfx.trigger_pickup_flash(cx, cy, effect_type)
 
     def update_effects(self, dt: float) -> List[Dict[str, Any]]:
         """
@@ -231,6 +261,13 @@ class Player:
 
         # Update steam particles
         self._update_steam_particles(dt)
+
+        # Update power-up VFX
+        self.vfx.update(
+            dt, self.active_effects,
+            self.x, self.y, self.width, self.height,
+            self.facing_right
+        )
 
     def extend_leash(self, cross_arena_max_x: int = None) -> None:
         """Extend the leash, allowing more movement range.
@@ -396,57 +433,95 @@ class Player:
             cache = SpriteCache()
             sprite = cache.get_dog_sprite(self.character_id, self.facing_right)
 
+        # Use generated boost-wing sprite sheets when available
+        boost_sprite_override = self._get_boost_sprite_override()
+        using_boost_sheet = boost_sprite_override is not None
+        if boost_sprite_override is not None:
+            sprite = boost_sprite_override
+
         # Handle invincibility flashing
         if self.is_invincible:
             if int(time.time() * 10) % 2 == 0:
                 # Create a white-tinted version
+                # Use BLEND_RGB_ADD (not RGBA) to avoid alpha channel corruption on macOS
                 flash_sprite = sprite.copy()
-                flash_sprite.fill((255, 255, 255, 100), special_flags=pygame.BLEND_RGBA_ADD)
+                flash_sprite.fill((255, 255, 255, 0), special_flags=pygame.BLEND_RGB_ADD)
                 sprite = flash_sprite
 
         # Handle slow effect (broccoli) - turn green
         has_slow_effect = any(e["type"] == "slow" for e in self.active_effects)
         if has_slow_effect:
             green_sprite = sprite.copy()
-            green_sprite.fill((0, 150, 0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+            green_sprite.fill((0, 150, 0, 0), special_flags=pygame.BLEND_RGB_ADD)
             sprite = green_sprite
 
         # Handle chaos effect (chilli) - turn red
         has_chaos_effect = any(e["type"] == "chaos" for e in self.active_effects)
         if has_chaos_effect:
             red_sprite = sprite.copy()
-            red_sprite.fill((150, 0, 0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+            red_sprite.fill((150, 0, 0, 0), special_flags=pygame.BLEND_RGB_ADD)
             sprite = red_sprite
 
         # Handle boost effect (red bull) - add blue tint
-        if self.has_boost_effect():
+        if self.has_boost_effect() and not using_boost_sheet:
             blue_sprite = sprite.copy()
-            blue_sprite.fill((0, 50, 150, 0), special_flags=pygame.BLEND_RGBA_ADD)
+            blue_sprite.fill((0, 50, 150, 0), special_flags=pygame.BLEND_RGB_ADD)
             sprite = blue_sprite
 
-        # Draw speed lines BEHIND the sprite (for boost effect)
+        # Draw speed lines BEHIND the sprite (legacy simple lines)
         for line in self.speed_lines:
             line_x = int(line["x"] - self.arena_bounds.left + offset[0])
             line_y = int(line["y"] - self.arena_bounds.top + offset[1])
             alpha = int(255 * (line["life"] / 0.3))
             length = int(line["length"])
 
-            # Draw speed line (cyan/light blue)
             line_surface = pygame.Surface((length, 4), pygame.SRCALPHA)
             pygame.draw.line(line_surface, (100, 200, 255, alpha), (0, 2), (length, 2), 3)
             surface.blit(line_surface, (line_x, line_y - 2))
 
+        # --- Power-up VFX: behind-sprite pass (aura, wings, afterimages) ---
+        self.vfx.render_behind(
+            surface, sprite, render_x, render_y,
+            self.width, self.height, self.active_effects,
+            self.arena_bounds.left, self.arena_bounds.top, offset,
+            facing_right=self.facing_right,
+            render_wings=not using_boost_sheet
+        )
+
         # Draw the sprite
         surface.blit(sprite, (render_x, render_y))
 
+        # --- Power-up VFX: front-sprite pass (particles, indicators, flashes) ---
+        self.vfx.render_front(
+            surface, render_x, render_y,
+            self.width, self.height, self.active_effects,
+            self.arena_bounds.left, self.arena_bounds.top, offset,
+            facing_right=self.facing_right,
+            render_wings=not using_boost_sheet
+        )
+
         # Draw steam particles (for chaos/chilli effect)
+        from ..sprites.sprite_sheet_loader import SpriteSheetLoader
+        steam_sprite = SpriteSheetLoader().get_steam_sprite()
+        
         for p in self.steam_particles:
             particle_x = int(p["x"] - self.arena_bounds.left + offset[0])
             particle_y = int(p["y"] - self.arena_bounds.top + offset[1])
             alpha = int(255 * (p["life"] / 0.8))
             size = int(p["size"])
 
-            # Draw steam puff (white/gray circle with transparency)
-            steam_surface = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
-            pygame.draw.circle(steam_surface, (255, 255, 255, alpha), (size, size), size)
-            surface.blit(steam_surface, (particle_x - size, particle_y - size))
+            if steam_sprite:
+                # Use sprite
+                sprite_size = size * 2
+                scaled_steam = pygame.transform.scale(steam_sprite, (sprite_size, sprite_size))
+                # Use BLEND_RGBA_MULT for reliable alpha fading on macOS SDL2 Metal
+                faded_steam = scaled_steam.copy()
+                fade_mask = pygame.Surface(faded_steam.get_size(), pygame.SRCALPHA)
+                fade_mask.fill((255, 255, 255, alpha))
+                faded_steam.blit(fade_mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+                surface.blit(faded_steam, (particle_x - size, particle_y - size))
+            else:
+                # Draw steam puff (white/gray circle with transparency) fallback
+                steam_surface = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+                pygame.draw.circle(steam_surface, (255, 255, 255, alpha), (size, size), size)
+                surface.blit(steam_surface, (particle_x - size, particle_y - size))

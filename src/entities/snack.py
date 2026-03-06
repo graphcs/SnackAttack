@@ -127,8 +127,12 @@ class Snack:
             import time
             if int(time.time() * 5) % 2 == 0:
                 # Make sprite semi-transparent by creating a copy
+                # Using set_alpha on a convert_alpha() copy is safe, but we use
+                # fill+BLEND_RGBA_MULT as a more reliable cross-platform approach
                 sprite = sprite.copy()
-                sprite.set_alpha(128)
+                alpha_surface = pygame.Surface(sprite.get_size(), pygame.SRCALPHA)
+                alpha_surface.fill((255, 255, 255, 128))
+                sprite.blit(alpha_surface, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
 
         # Draw the sprite
         surface.blit(sprite, (render_x, render_y))

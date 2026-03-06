@@ -148,16 +148,30 @@ class _VotingBot:
                 content = message.content.strip().lower()
                 author_name = message.author.name if message.author else "anonymous"
 
-                if content == '!extend':
+                if not content.startswith('!') or len(content) <= 1:
+                    return
+
+                # Accept any !command and let the gameplay voting system validate
+                vote_type = content[1:].strip()
+                if not vote_type:
+                    return
+
+                if vote_type == 'extend':
                     pygame.event.post(pygame.event.Event(
                         TWITCH_VOTE_EVENT,
                         vote_type="extend",
                         voter_id=author_name
                     ))
-                elif content == '!yank':
+                elif vote_type == 'yank':
                     pygame.event.post(pygame.event.Event(
                         TWITCH_VOTE_EVENT,
                         vote_type="yank",
+                        voter_id=author_name
+                    ))
+                else:
+                    pygame.event.post(pygame.event.Event(
+                        TWITCH_VOTE_EVENT,
+                        vote_type=vote_type,
                         voter_id=author_name
                     ))
 

@@ -3,6 +3,7 @@
 import pygame
 import os
 from typing import Optional
+from pathlib import Path
 
 from .core.config_manager import ConfigManager
 from .core.event_bus import EventBus, GameEvent
@@ -13,6 +14,8 @@ from .screens.gameplay import GameplayScreen
 from .screens.treat_attack_gameplay import TreatAttackGameplay
 from .screens.settings import SettingsScreen
 from .screens.game_over import GameOverScreen
+from .screens.upload_avatar import UploadAvatarScreen
+from .screens.avatar_showcase import AvatarShowcaseScreen
 from .audio.audio_manager import AudioManager
 
 
@@ -33,6 +36,10 @@ class Game:
         # Get the directory where this file is located
         self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         config_dir = os.path.join(self.base_dir, "config")
+
+        # Load environment variables (for API keys)
+        from .core.env_loader import load_env
+        load_env()
 
         # Initialize core systems
         self.config = ConfigManager()
@@ -60,7 +67,7 @@ class Game:
         self.screen_height = int(self.game_height * self.scale_factor)
 
         self.fps = self.config.get("game_settings.window.fps", 60)
-        title = self.config.get("game_settings.window.title", "Jazzy's Snack Attack")
+        title = self.config.get("game_settings.window.title", "Jazzy's Treat Storm")
 
         # Create the display surface (actual window) - resizable
         self.screen = pygame.display.set_mode((self.screen_width, self.screen_height), pygame.RESIZABLE)
@@ -114,6 +121,8 @@ class Game:
         treat_attack = TreatAttackGameplay(self.state_machine, self.config, self.event_bus)
         settings = SettingsScreen(self.state_machine, self.config, self.event_bus)
         game_over = GameOverScreen(self.state_machine, self.config, self.event_bus)
+        upload_avatar = UploadAvatarScreen(self.state_machine, self.config, self.event_bus)
+        avatar_showcase = AvatarShowcaseScreen(self.state_machine, self.config, self.event_bus)
 
         # Register screens with state machine
         self.state_machine.register_state(GameState.MAIN_MENU, main_menu)
@@ -122,6 +131,8 @@ class Game:
         self.state_machine.register_state(GameState.TREAT_ATTACK, treat_attack)
         self.state_machine.register_state(GameState.SETTINGS, settings)
         self.state_machine.register_state(GameState.GAME_OVER, game_over)
+        self.state_machine.register_state(GameState.UPLOAD_AVATAR, upload_avatar)
+        self.state_machine.register_state(GameState.AVATAR_SHOWCASE, avatar_showcase)
 
         # Start at main menu
         self.state_machine.change_state(GameState.MAIN_MENU)
@@ -237,6 +248,24 @@ class Game:
 
 def main():
     """Entry point for the game."""
+    from .core.env_loader import validate_required_env
+
+    project_root = Path(__file__).resolve().parent.parent
+    env_path = project_root / ".env"
+    is_valid, missing_keys, env_exists = validate_required_env(
+        ["REMBG_API_KEY", "OPENROUTER_API_KEY"],
+        env_path=env_path
+    )
+
+    if not is_valid:
+        print("ERROR: Cannot start game due to missing required environment configuration.")
+        if not env_exists:
+            print(f"- Missing file: {env_path}")
+        if missing_keys:
+            print(f"- Missing keys in .env: {', '.join(missing_keys)}")
+        print("- Create/update .env (use .env.example as a template), then run again.")
+        return
+
     game = Game()
     game.run()
 
