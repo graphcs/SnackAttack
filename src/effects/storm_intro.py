@@ -1,19 +1,23 @@
 """Lightning + Treat Storm intro sequence for the Treat Attack game mode.
 
-Plays a cinematic intro animation before gameplay begins:
-  1. Clouds gathering — multi-layered volumetric clouds with internal turbulence,
-     wind-driven rain particle system, and progressive sky darkening.
-  2. Lightning strike — multiple successive bolts with forked branches, a ground-
-     impact bloom, per-bolt screen shake, and realistic afterglow decay.
-  3. Screen flicker — organic flicker with varied intensity, colour temperature
-     shifts, and a final thunder-rumble screen shake.
-  4. Dogs march — dog walks in from off-screen with footstep dust puffs, a dynamic
-     shadow, wind-swept rain, and a dramatic "GO!" title slam.
+Plays a cinematic intro animation using pre-generated pixel-art sprites:
+  1. Clouds gathering — sprite-based storm clouds roll in over a sky that
+     transitions from clear pastel to dark storm. Rain particles intensify.
+  2. Lightning strike — sprite-based lightning bolts with flash overlay,
+     screen shake, and ground bloom effects.
+  3. Screen flicker — organic flicker with varied intensity and colour
+     temperature shifts, plus a final thunder-rumble screen shake.
+  4. Dogs march — dogs walk in from off-screen with dust puffs, a dynamic
+     shadow, and dramatic "TREAT STORM!" / "GO!" title sprites.
+
+All sprite assets are loaded from ui/storm_intro/.
 """
 
 import pygame
 import math
+import os
 import random
+from glob import glob
 from enum import Enum, auto
 from typing import List, Tuple, Optional, Dict
 
@@ -33,34 +37,38 @@ class IntroPhase(Enum):
 
 # Phase durations (seconds)
 _PHASE_DURATIONS: Dict[IntroPhase, float] = {
-    IntroPhase.CLOUDS_GATHER: 3.0,
+    IntroPhase.CLOUDS_GATHER: 4.0,
     IntroPhase.LIGHTNING_STRIKE: 1.6,
     IntroPhase.SCREEN_FLICKER: 0.9,
     IntroPhase.DOGS_MARCH: 2.2,
 }
 
-# Sky gradient endpoints (clear -> stormy)
-_SKY_CLEAR_TOP = (135, 206, 235)
-_SKY_CLEAR_BOT = (100, 165, 210)
-_SKY_STORM_TOP = (22, 22, 38)
-_SKY_STORM_BOT = (12, 12, 22)
+# Rain colours
+_RAIN_COLOR = (160, 175, 200)
+_RAIN_HEAVY_COLOR = (130, 150, 180)
 
-# Lightning palette
+# Lightning palette (for procedural ground bloom)
 _BOLT_CORE = (230, 230, 255)
 _BOLT_INNER_GLOW = (180, 190, 255)
 _BOLT_OUTER_GLOW = (120, 130, 220)
-_FLASH_TINT = (200, 210, 255)
 
-# Cloud palette (dark storm clouds with subtle colour variation)
-_CLOUD_DARK = (40, 42, 55)
-_CLOUD_MID = (60, 62, 78)
-_CLOUD_LIGHT = (85, 88, 105)
-_CLOUD_HIGHLIGHT = (110, 115, 135)
-_CLOUD_UNDERBELLY = (30, 30, 42)
+_STORM_FRAME_PHASES = (
+    IntroPhase.CLOUDS_GATHER,
+    IntroPhase.LIGHTNING_STRIKE,
+    IntroPhase.SCREEN_FLICKER,
+)
 
-# Rain
-_RAIN_COLOR = (160, 175, 200)
-_RAIN_HEAVY_COLOR = (130, 150, 180)
+
+# ---------------------------------------------------------------------------
+# Asset directory
+# ---------------------------------------------------------------------------
+
+def _get_asset_dir() -> str:
+    """Resolve the storm intro asset directory."""
+    # Navigate from src/effects/ up to project root, then into ui/storm_intro
+    here = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(here))
+    return os.path.join(project_root, "ui", "storm_intro")
 
 
 # ---------------------------------------------------------------------------
@@ -171,180 +179,6 @@ class _DustPuff:
 
 
 # ---------------------------------------------------------------------------
-# Cloud (volumetric, multi-blob with turbulence)
-# ---------------------------------------------------------------------------
-
-class _Cloud:
-    """An animated storm cloud with layered blobs and internal turbulence."""
-
-    def __init__(self, x: float, y: float, width: float, height: float,
-                 speed: float, layer: int, target_x: float = 0.0):
-        self.x = x
-        self.y = y
-        self.width = width
-        self.height = height
-        self.speed = speed
-        self.layer = layer  # 0 = far back, 1 = mid, 2 = front
-        self.target_x = target_x  # Final resting x when gathered
-        self.turbulence_offset = random.uniform(0, math.pi * 2)
-        self._blobs: List[Tuple[float, float, float, float]] = []  # (ox, oy, rx, ry)
-        self._generate_blobs()
-
-    def _generate_blobs(self) -> None:
-        """Generate overlapping ellipses that form a realistic cloud mass."""
-        count = random.randint(6, 12)
-        for _ in range(count):
-            # Cluster blobs toward the centre for a denser core
-            ox = random.gauss(0, self.width * 0.22)
-            oy = random.gauss(self.height * 0.05, self.height * 0.18)
-            rx = random.uniform(self.width * 0.2, self.width * 0.42)
-            ry = random.uniform(self.height * 0.3, self.height * 0.55)
-            self._blobs.append((ox, oy, rx, ry))
-
-        # Large base blob for flat bottom typical of cumulonimbus
-        self._blobs.append(
-            (0, self.height * 0.15, self.width * 0.45, self.height * 0.3)
-        )
-
-    def render(self, surface: pygame.Surface, alpha: int, time: float,
-               lightning_flash: float = 0.0) -> None:
-        """Render cloud with internal lighting variation.
-
-        Args:
-            surface: Target surface.
-            alpha: Base opacity (0-255).
-            time: Current elapsed time for turbulence animation.
-            lightning_flash: 0.0-1.0 intensity of lightning illumination.
-        """
-        buf_w = int(self.width * 1.6)
-        buf_h = int(self.height * 2.4)
-        cloud_surf = pygame.Surface((buf_w, buf_h), pygame.SRCALPHA)
-        cx, cy = buf_w // 2, buf_h // 2
-
-        # Pick base colour by layer depth
-        if self.layer == 0:
-            base = _CLOUD_DARK
-        elif self.layer == 1:
-            base = _CLOUD_MID
-        else:
-            base = _CLOUD_LIGHT
-
-        # Lightning illumination tints clouds white
-        if lightning_flash > 0:
-            base = _lerp_color(base, (200, 205, 220), lightning_flash * 0.6)
-
-        for ox, oy, rx, ry in self._blobs:
-            # Turbulence: slightly shift blobs over time
-            turb = math.sin(
-                time * 1.5 + self.turbulence_offset + ox * 0.01
-            ) * 3.0
-            blob_x = cx + ox + turb
-            blob_y = cy + oy
-
-            # Vary opacity per blob for depth illusion
-            blob_alpha = max(0, min(255, alpha - random.randint(0, 30)))
-            color = (*base, blob_alpha)
-
-            rect = pygame.Rect(
-                int(blob_x - rx), int(blob_y - ry),
-                int(rx * 2), int(ry * 2)
-            )
-            pygame.draw.ellipse(cloud_surf, color, rect)
-
-        # Top highlight (sun/ambient light from above)
-        hl_alpha = min(alpha, 70 + int(lightning_flash * 80))
-        highlight = (*_CLOUD_HIGHLIGHT, hl_alpha)
-        pygame.draw.ellipse(
-            cloud_surf, highlight,
-            pygame.Rect(
-                cx - int(self.width * 0.25),
-                cy - int(self.height * 0.5),
-                int(self.width * 0.5),
-                int(self.height * 0.35),
-            )
-        )
-
-        # Dark underbelly
-        belly_alpha = min(alpha, 120)
-        belly_color = (*_CLOUD_UNDERBELLY, belly_alpha)
-        pygame.draw.ellipse(
-            cloud_surf, belly_color,
-            pygame.Rect(
-                cx - int(self.width * 0.35),
-                cy + int(self.height * 0.05),
-                int(self.width * 0.7),
-                int(self.height * 0.35),
-            )
-        )
-
-        surface.blit(cloud_surf, (int(self.x - cx), int(self.y - cy)))
-
-
-# ---------------------------------------------------------------------------
-# Lightning bolt generator
-# ---------------------------------------------------------------------------
-
-def _generate_bolt(
-    start: Tuple[float, float],
-    end: Tuple[float, float],
-    detail: int = 7,
-    offset_scale: float = 90.0,
-) -> List[Tuple[float, float]]:
-    """Recursively generate a jagged bolt path (mid-point displacement)."""
-    if detail <= 0:
-        return [start, end]
-
-    mid_x = (start[0] + end[0]) / 2 + random.uniform(-offset_scale, offset_scale)
-    mid_y = (start[1] + end[1]) / 2 + random.uniform(
-        -offset_scale * 0.25, offset_scale * 0.25
-    )
-    mid = (mid_x, mid_y)
-
-    left = _generate_bolt(start, mid, detail - 1, offset_scale * 0.52)
-    right = _generate_bolt(mid, end, detail - 1, offset_scale * 0.52)
-    return left + right[1:]
-
-
-def _generate_branches(
-    bolt: List[Tuple[float, float]],
-    branch_chance: float = 0.3,
-    branch_length: float = 80.0,
-) -> List[List[Tuple[float, float]]]:
-    """Generate forked side-branches off the main bolt."""
-    branches: List[List[Tuple[float, float]]] = []
-    for i, point in enumerate(bolt):
-        if i < 2 or i > len(bolt) - 3:
-            continue
-        if random.random() < branch_chance:
-            # Branch angle biased downward
-            angle = random.uniform(math.pi * 0.15, math.pi * 0.65)
-            if random.random() < 0.5:
-                angle = -angle
-            length = random.uniform(branch_length * 0.3, branch_length)
-            end = (
-                point[0] + math.cos(angle) * length,
-                point[1] + math.sin(angle) * length * 0.6 + length * 0.4,
-            )
-            branch = _generate_bolt(point, end, detail=3, offset_scale=18.0)
-            branches.append(branch)
-            # Occasional sub-branch
-            if random.random() < 0.3 and len(branch) > 2:
-                sub_start = branch[len(branch) // 2]
-                sub_angle = angle + random.uniform(-0.4, 0.4)
-                sub_len = length * 0.4
-                sub_end = (
-                    sub_start[0] + math.cos(sub_angle) * sub_len,
-                    sub_start[1] + math.sin(sub_angle) * sub_len * 0.5
-                    + sub_len * 0.3,
-                )
-                sub_branch = _generate_bolt(
-                    sub_start, sub_end, detail=2, offset_scale=10.0
-                )
-                branches.append(sub_branch)
-    return branches
-
-
-# ---------------------------------------------------------------------------
 # Ground-impact bloom (bright circle at strike point)
 # ---------------------------------------------------------------------------
 
@@ -376,17 +210,14 @@ class _GroundBloom:
         size = int(self.radius * 2 + 10)
         s = pygame.Surface((size, size), pygame.SRCALPHA)
         centre = size // 2
-        # Outer glow
         pygame.draw.circle(
             s, (*_BOLT_OUTER_GLOW, self.alpha // 3),
             (centre, centre), int(self.radius)
         )
-        # Inner glow
         pygame.draw.circle(
             s, (*_BOLT_INNER_GLOW, self.alpha // 2),
             (centre, centre), int(self.radius * 0.5)
         )
-        # Core
         pygame.draw.circle(
             s, (*_BOLT_CORE, self.alpha),
             (centre, centre), max(2, int(self.radius * 0.15))
@@ -422,11 +253,68 @@ class _ScreenShake:
 
 
 # ---------------------------------------------------------------------------
+# Sprite-based cloud
+# ---------------------------------------------------------------------------
+
+class _SpriteCloud:
+    """A storm cloud using a pre-rendered sprite, animated to slide in."""
+
+    def __init__(self, sprite: pygame.Surface, start_x: float, target_x: float,
+                 y: float, speed: float, layer: int, scale: float = 1.0):
+        self.original_sprite = sprite
+        if scale != 1.0:
+            new_w = int(sprite.get_width() * scale)
+            new_h = int(sprite.get_height() * scale)
+            self.sprite = pygame.transform.smoothscale(sprite, (new_w, new_h))
+        else:
+            self.sprite = sprite
+        self.x = start_x
+        self.target_x = target_x
+        self.y = y
+        self.speed = speed
+        self.layer = layer
+        self.bob_offset = random.uniform(0, math.pi * 2)
+
+    def update(self, dt: float, t_gather: float, global_time: float) -> None:
+        """Move toward target and add gentle bob."""
+        diff = self.target_x - self.x
+        if t_gather < 0.4:
+            speed_mult = 2.5
+        else:
+            speed_mult = _lerp(2.5, 0.5, (t_gather - 0.4) / 0.6)
+        eased = _ease_in_out(t_gather)
+        approach_speed = abs(self.speed) * (1.0 + (1.0 - eased) * speed_mult)
+        if abs(diff) > 2.0:
+            direction = 1.0 if diff > 0 else -1.0
+            self.x += direction * approach_speed * dt
+            if (direction > 0 and self.x > self.target_x) or \
+               (direction < 0 and self.x < self.target_x):
+                self.x = self.target_x
+        else:
+            self.x = _lerp(self.x, self.target_x, dt * 2.0)
+
+        # Gentle vertical bob
+        self.y += math.sin(global_time * 0.7 + self.bob_offset) * 3.0 * dt
+
+    def render(self, surface: pygame.Surface, alpha: int = 255) -> None:
+        """Render the cloud sprite."""
+        if alpha < 255:
+            temp = self.sprite.copy()
+            temp.set_alpha(alpha)
+            surface.blit(temp, (int(self.x), int(self.y)))
+        else:
+            surface.blit(self.sprite, (int(self.x), int(self.y)))
+
+
+# ---------------------------------------------------------------------------
 # StormIntroSequence
 # ---------------------------------------------------------------------------
 
 class StormIntroSequence:
     """Orchestrates the full Lightning + Treat Storm intro animation.
+
+    Uses pre-generated pixel-art sprites from ui/storm_intro/ for a
+    dramatic, polished intro sequence.
 
     Usage::
 
@@ -449,45 +337,52 @@ class StormIntroSequence:
         self.global_timer = 0.0
         self.is_complete = False
 
-        # Clouds (3 layers)
-        self._clouds: List[_Cloud] = []
+        # — Asset loading —
+        asset_dir = _get_asset_dir()
+        self._assets: Dict[str, Optional[pygame.Surface]] = {}
+        self._storm_frames: List[pygame.Surface] = []
+        self._scaled_storm_frames: List[pygame.Surface] = []
+        self._scaled_storm_frame_size: Optional[Tuple[int, int]] = None
+        self._load_assets(asset_dir)
+        self._storm_sequence_duration = sum(
+            _PHASE_DURATIONS[phase] for phase in _STORM_FRAME_PHASES
+        )
+
+        # Sprite-based clouds
+        self._clouds: List[_SpriteCloud] = []
 
         # Rain particles
         self._rain: List[_RainDrop] = []
-        self._rain_intensity = 0.0  # 0..1, ramps up over time
-        self._wind = 0.0  # horizontal wind for rain
+        self._rain_intensity = 0.0
+        self._wind = 0.0
 
-        # Lightning (supports multiple sequential bolts)
-        self._bolts: List[dict] = []
+        # Lightning state
+        self._active_bolts: List[dict] = []  # sprite-based bolt instances
         self._pending_bolt_times: List[float] = []
-        self._lightning_flash = 0.0  # global flash intensity 0..1
+        self._lightning_flash = 0.0
+        self._ground_blooms: List[_GroundBloom] = []
 
         # Screen shake
         self._shake = _ScreenShake()
 
         # Flicker
-        self._flicker_flash = 0.0  # intensity 0..1
+        self._flicker_flash = 0.0
         self._flicker_index = 0
         self._flicker_pattern = [
-            # (duration, intensity, color_temp_shift)
-            (0.06, 0.9, 0.0),
-            (0.04, 0.0, 0.0),
-            (0.08, 1.0, 0.1),
-            (0.05, 0.0, 0.0),
-            (0.04, 0.6, -0.05),
-            (0.06, 0.0, 0.0),
-            (0.10, 0.8, 0.05),
-            (0.03, 0.3, 0.0),
-            (0.07, 0.0, 0.0),
-            (0.12, 0.5, -0.1),
+            (0.06, 0.9, 0.0), (0.04, 0.0, 0.0),
+            (0.08, 1.0, 0.1), (0.05, 0.0, 0.0),
+            (0.04, 0.6, -0.05), (0.06, 0.0, 0.0),
+            (0.10, 0.8, 0.05), (0.03, 0.3, 0.0),
+            (0.07, 0.0, 0.0), (0.12, 0.5, -0.1),
             (0.25, 0.0, 0.0),
         ]
         self._flicker_sub_timer = 0.0
         self._flicker_temp_shift = 0.0
 
-        # Dog march — supports two dogs coming from opposite sides
+        # Dog march
         self._dog1_sprite: Optional[pygame.Surface] = None
         self._dog2_sprite: Optional[pygame.Surface] = None
+        self._dog_render_scale = 1.12
         self._dog1_start_x = 0.0
         self._dog1_target_x = 0.0
         self._dog1_current_x = 0.0
@@ -500,12 +395,144 @@ class StormIntroSequence:
         self._last_step_x1 = 0.0
         self._last_step_x2 = 0.0
 
-        # Title / GO text
+        # Title sprites
         self._title_scale = 0.0
         self._title_alpha = 0
         self._go_alpha = 0
-        self._title_font: Optional[pygame.font.Font] = None
-        self._go_font: Optional[pygame.font.Font] = None
+
+    # ------------------------------------------------------------------
+    # Asset loading
+    # ------------------------------------------------------------------
+
+    def _load_assets(self, asset_dir: str) -> None:
+        """Load all sprite assets from the storm_intro directory."""
+        asset_sources = {
+            "clear_sky_bg": ["clear_sky_bg.png"],
+            "storm_sky_bg": ["storm_sky_bg.png"],
+            "storm_cloud_large": ["storm_cloud_large.png"],
+            "storm_cloud_medium": ["storm_cloud_medium.png"],
+            "storm_cloud_small": ["storm_cloud_small.png"],
+            "lightning_bolt": ["lightning_bolt.png"],
+            "lightning_flash": ["lightning_flash.png"],
+            "ground_scene": ["ground_scene.png", "ground.png"],
+            "title_treat_storm": ["title_treat_storm.png", "Title  .png"],
+            "title_go": ["title_go.png", "go.png"],
+            "dust_puff": ["dust_puff.png"],
+            "vignette_overlay": ["vignette_overlay.png"],
+            "silver_lining_glow": ["silver_lining_glow.png"],
+        }
+        for name, candidates in asset_sources.items():
+            self._assets[name] = self._load_first_asset(asset_dir, candidates)
+
+        self._load_storm_frames(asset_dir)
+
+    def _load_first_asset(
+        self, asset_dir: str, candidates: List[str]
+    ) -> Optional[pygame.Surface]:
+        for candidate in candidates:
+            path = os.path.join(asset_dir, candidate)
+            if not os.path.exists(path):
+                continue
+            try:
+                return pygame.image.load(path).convert_alpha()
+            except pygame.error:
+                continue
+        return None
+
+    def _load_storm_frames(self, asset_dir: str) -> None:
+        """Load ordered frame images for the storm animation sequence."""
+        frame_paths: List[str] = []
+        for extension in ("jpg", "jpeg", "png"):
+            frame_paths.extend(glob(os.path.join(asset_dir, f"ezgif-frame-*.{extension}")))
+
+        def _frame_key(path: str) -> int:
+            name = os.path.basename(path)
+            digits = "".join(ch for ch in name if ch.isdigit())
+            return int(digits) if digits else 0
+
+        self._storm_frames.clear()
+        self._scaled_storm_frames.clear()
+        self._scaled_storm_frame_size = None
+
+        for path in sorted(set(frame_paths), key=_frame_key):
+            try:
+                loaded = pygame.image.load(path)
+                if loaded.get_alpha() is not None:
+                    image = loaded.convert_alpha()
+                else:
+                    image = loaded.convert()
+                self._storm_frames.append(image)
+            except pygame.error:
+                continue
+
+    def _has_storm_frames(self) -> bool:
+        return bool(self._storm_frames)
+
+    def _get_scaled_storm_frames(self) -> List[pygame.Surface]:
+        target_size = (self.screen_width, self.screen_height)
+        if self._scaled_storm_frame_size == target_size and self._scaled_storm_frames:
+            return self._scaled_storm_frames
+
+        scaled_frames: List[pygame.Surface] = []
+        target_w, target_h = target_size
+        for frame in self._storm_frames:
+            src_w, src_h = frame.get_size()
+            if src_w <= 0 or src_h <= 0:
+                continue
+
+            scale = max(target_w / src_w, target_h / src_h)
+            scaled_w = max(1, int(round(src_w * scale)))
+            scaled_h = max(1, int(round(src_h * scale)))
+            scaled = pygame.transform.smoothscale(frame, (scaled_w, scaled_h))
+
+            crop_x = max(0, (scaled_w - target_w) // 2)
+            crop_y = max(0, (scaled_h - target_h) // 2)
+            cropped = pygame.Surface(target_size)
+            cropped.blit(scaled, (-crop_x, -crop_y))
+            scaled_frames.append(cropped)
+
+        self._scaled_storm_frames = scaled_frames
+        self._scaled_storm_frame_size = target_size
+        return self._scaled_storm_frames
+
+    def _get_storm_animation_elapsed(self) -> float:
+        if self.phase == IntroPhase.CLOUDS_GATHER:
+            return self.phase_timer
+        if self.phase == IntroPhase.LIGHTNING_STRIKE:
+            return _PHASE_DURATIONS[IntroPhase.CLOUDS_GATHER] + self.phase_timer
+        if self.phase == IntroPhase.SCREEN_FLICKER:
+            return (
+                _PHASE_DURATIONS[IntroPhase.CLOUDS_GATHER]
+                + _PHASE_DURATIONS[IntroPhase.LIGHTNING_STRIKE]
+                + self.phase_timer
+            )
+        return self._storm_sequence_duration
+
+    def _get_current_storm_frame(self) -> Optional[pygame.Surface]:
+        frames = self._get_scaled_storm_frames()
+        if not frames:
+            return None
+
+        if self.phase in _STORM_FRAME_PHASES and self._storm_sequence_duration > 0:
+            progress = min(
+                max(self._get_storm_animation_elapsed() / self._storm_sequence_duration, 0.0),
+                1.0,
+            )
+            frame_index = min(len(frames) - 1, int(progress * len(frames)))
+        else:
+            frame_index = len(frames) - 1
+
+        return frames[frame_index]
+
+    def _render_storm_frame(self, surface: pygame.Surface) -> bool:
+        frame = self._get_current_storm_frame()
+        if frame is None:
+            return False
+        surface.blit(frame, (0, 0))
+        return True
+
+    def _get_asset(self, name: str) -> Optional[pygame.Surface]:
+        return self._assets.get(name)
 
     # ------------------------------------------------------------------
     # Public API
@@ -516,6 +543,8 @@ class StormIntroSequence:
         dog1_sprite: Optional[pygame.Surface] = None,
         dog2_sprite: Optional[pygame.Surface] = None,
         dog_ground_y: float = 650.0,
+        dog_sprite: Optional[pygame.Surface] = None,
+        dog_target_x: Optional[float] = None,
     ) -> None:
         """Begin the intro sequence.
 
@@ -523,20 +552,27 @@ class StormIntroSequence:
             dog1_sprite: Player 1 sprite (faces right, enters from left).
             dog2_sprite: Player 2 sprite (faces left, enters from right).
             dog_ground_y: Y coordinate for the dogs' ground level.
+            dog_sprite: Backward-compatible alias for a single left-entry dog sprite.
+            dog_target_x: Optional target X override for the left-entry dog.
         """
+        if dog1_sprite is None and dog_sprite is not None:
+            dog1_sprite = dog_sprite
+
         self.phase = IntroPhase.CLOUDS_GATHER
         self.phase_timer = 0.0
         self.global_timer = 0.0
         self.is_complete = False
 
-        # Dog 1 enters from left, walks right toward ~35% of screen
+        # Dog 1 enters from left
         self._dog1_sprite = dog1_sprite
         self._dog1_start_x = -140.0
-        self._dog1_target_x = self.screen_width * 0.28
+        self._dog1_target_x = (
+            dog_target_x if dog_target_x is not None else self.screen_width * 0.28
+        )
         self._dog1_current_x = self._dog1_start_x
         self._last_step_x1 = self._dog1_start_x
 
-        # Dog 2 enters from right, walks left toward ~65% of screen
+        # Dog 2 enters from right
         self._dog2_sprite = dog2_sprite
         self._dog2_start_x = self.screen_width + 140.0
         self._dog2_target_x = self.screen_width * 0.58
@@ -551,7 +587,8 @@ class StormIntroSequence:
         self._rain_intensity = 0.0
         self._wind = 0.0
 
-        self._bolts.clear()
+        self._active_bolts.clear()
+        self._ground_blooms.clear()
         self._pending_bolt_times.clear()
         self._lightning_flash = 0.0
 
@@ -564,8 +601,6 @@ class StormIntroSequence:
         self._title_scale = 0.0
         self._title_alpha = 0
         self._go_alpha = 0
-        self._title_font = pygame.font.Font(None, 64)
-        self._go_font = pygame.font.Font(None, 110)
 
         self._build_clouds()
 
@@ -595,26 +630,40 @@ class StormIntroSequence:
         self.global_timer += dt
 
         # Always-running subsystems
-        self._update_rain(dt)
-        self._update_bolts(dt)
+        use_frame_sequence = self._has_storm_frames() and self.phase in _STORM_FRAME_PHASES
+        if use_frame_sequence:
+            self._rain.clear()
+            self._active_bolts.clear()
+            self._ground_blooms.clear()
+            self._lightning_flash = 0.0
+        else:
+            self._update_rain(dt)
+            self._update_lightning(dt)
         self._shake.update(dt)
 
         # Phase-specific
-        handler = {
-            IntroPhase.CLOUDS_GATHER: self._update_clouds,
-            IntroPhase.LIGHTNING_STRIKE: self._update_lightning_phase,
-            IntroPhase.SCREEN_FLICKER: self._update_flicker,
-            IntroPhase.DOGS_MARCH: self._update_march,
-        }.get(self.phase)
+        handler = None
+        if not use_frame_sequence:
+            handler = {
+                IntroPhase.CLOUDS_GATHER: self._update_clouds,
+                IntroPhase.LIGHTNING_STRIKE: self._update_lightning_phase,
+                IntroPhase.SCREEN_FLICKER: self._update_flicker,
+                IntroPhase.DOGS_MARCH: self._update_march,
+            }.get(self.phase)
+        elif self.phase == IntroPhase.DOGS_MARCH:
+            handler = self._update_march
         if handler:
             handler(dt)
 
         # Advance phase
-        phase_dur = _PHASE_DURATIONS.get(self.phase, 1.0)
-        if self.phase_timer >= phase_dur:
-            self._advance_phase()
+        while not self.is_complete:
+            phase_dur = _PHASE_DURATIONS.get(self.phase)
+            if phase_dur is None or self.phase_timer < phase_dur:
+                break
+            overflow = self.phase_timer - phase_dur
+            self._advance_phase(overflow)
 
-    def _advance_phase(self) -> None:
+    def _advance_phase(self, carry_over: float = 0.0) -> None:
         order = [
             IntroPhase.CLOUDS_GATHER,
             IntroPhase.LIGHTNING_STRIKE,
@@ -625,10 +674,9 @@ class StormIntroSequence:
         idx = order.index(self.phase)
         if idx + 1 < len(order):
             self.phase = order[idx + 1]
-            self.phase_timer = 0.0
+            self.phase_timer = max(0.0, carry_over)
 
             if self.phase == IntroPhase.LIGHTNING_STRIKE:
-                # Schedule 2-3 bolts at staggered times
                 self._pending_bolt_times = [0.0, 0.45]
                 if random.random() < 0.5:
                     self._pending_bolt_times.append(0.95)
@@ -649,27 +697,31 @@ class StormIntroSequence:
         if self.is_complete:
             return
 
-        # Render to a buffer so we can apply screen-shake
         buf = pygame.Surface(
             (self.screen_width, self.screen_height), pygame.SRCALPHA
         )
 
-        # 1) Sky
-        self._render_sky(buf)
-        # 2) Ground
+        rendered_frame = self._render_storm_frame(buf)
+        if not rendered_frame:
+            # 1) Sky background (cross-fade from clear to storm)
+            self._render_sky(buf)
+            # 2) Back-layer clouds (layer 0)
+            self._render_clouds(buf, layers=(0,))
+            # 3) Rain (behind mid/front clouds)
+            self._render_rain(buf)
+            # 4) Mid + front clouds (layers 1, 2)
+            self._render_clouds(buf, layers=(1, 2))
+            # 5) Vignette overlay
+            self._render_vignette(buf)
+            # 6) Lightning bolts & flash
+            self._render_lightning(buf)
+
+        # 7) Ground
         self._render_ground(buf)
-        # 3) Back-layer clouds
-        self._render_clouds(buf, layers=(0,))
-        # 4) Rain (behind mid/front clouds)
-        self._render_rain(buf)
-        # 5) Mid + front clouds
-        self._render_clouds(buf, layers=(1, 2))
-        # 6) Lightning bolts & blooms
-        self._render_bolts(buf)
-        # 7) Phase overlays (flicker, dog march)
+        # 8) Phase overlays (flicker, dog march)
         self._render_phase_overlay(buf)
 
-        # Apply screen-shake offset
+        # Apply screen-shake
         sx = int(self._shake.offset_x)
         sy = int(self._shake.offset_y)
         surface.fill((0, 0, 0))
@@ -682,81 +734,112 @@ class StormIntroSequence:
             self._render_dog_march(surface)
 
     # ------------------------------------------------------------------
-    # Phase: Clouds Gather
+    # Sky rendering (sprite cross-fade)
+    # ------------------------------------------------------------------
+
+    def _render_sky(self, surface: pygame.Surface) -> None:
+        """Cross-fade between clear sky and storm sky backgrounds."""
+        clear_bg = self._get_asset("clear_sky_bg")
+        storm_bg = self._get_asset("storm_sky_bg")
+
+        # Storm transition progress: 0 at start, 1 when clouds are gathered
+        t = min(self.progress * 1.25, 1.0)
+
+        sw, sh = self.screen_width, self.screen_height
+
+        if clear_bg and storm_bg:
+            # Scale both backgrounds to screen size
+            clear_scaled = pygame.transform.smoothscale(clear_bg, (sw, sh))
+            storm_scaled = pygame.transform.smoothscale(storm_bg, (sw, sh))
+
+            # Render clear sky first
+            if t < 1.0:
+                surface.blit(clear_scaled, (0, 0))
+
+            # Overlay storm sky with increasing alpha
+            if t > 0.0:
+                storm_alpha = int(t * 255)
+                storm_scaled.set_alpha(storm_alpha)
+                surface.blit(storm_scaled, (0, 0))
+        elif clear_bg:
+            surface.blit(pygame.transform.smoothscale(clear_bg, (sw, sh)), (0, 0))
+        elif storm_bg:
+            surface.blit(pygame.transform.smoothscale(storm_bg, (sw, sh)), (0, 0))
+        else:
+            # Fallback: procedural gradient
+            top = _lerp_color((135, 206, 235), (22, 22, 38), t)
+            bot = _lerp_color((100, 165, 210), (12, 12, 22), t)
+            for y in range(sh):
+                ratio = y / sh
+                color = _lerp_color(top, bot, ratio)
+                pygame.draw.line(surface, color, (0, y), (sw, y))
+
+    # ------------------------------------------------------------------
+    # Clouds (sprite-based)
     # ------------------------------------------------------------------
 
     def _build_clouds(self) -> None:
+        """Create sprite-based storm clouds across three layers."""
         self._clouds.clear()
         w = self.screen_width
 
-        # Layer 0 - far back (large, slow) — 4 clouds evenly spread
-        layer0_count = 4
-        for i in range(layer0_count):
-            # Spread targets evenly across the screen with some jitter
-            target_x = (w / (layer0_count + 1)) * (i + 1) + random.uniform(-40, 40)
-            side = -1 if i % 2 == 0 else 1
-            cx = side * (w * 0.7 + random.uniform(100, 300))  # start off-screen
-            cy = random.uniform(self.screen_height * 0.02, self.screen_height * 0.12)
-            cw = random.uniform(220, 340)
-            ch = random.uniform(70, 120)
-            spd = random.uniform(100, 170)
-            self._clouds.append(
-                _Cloud(cx, cy, cw, ch, spd * (-side), layer=0, target_x=target_x)
-            )
+        cloud_sprites = {
+            "large": self._get_asset("storm_cloud_large"),
+            "medium": self._get_asset("storm_cloud_medium"),
+            "small": self._get_asset("storm_cloud_small"),
+        }
 
-        # Layer 1 - mid — 5 clouds evenly spread
-        layer1_count = 5
-        for i in range(layer1_count):
-            target_x = (w / (layer1_count + 1)) * (i + 1) + random.uniform(-30, 30)
-            side = -1 if i % 2 == 0 else 1
-            cx = side * (w * 0.6 + random.uniform(80, 280))  # start off-screen
-            cy = random.uniform(self.screen_height * 0.06, self.screen_height * 0.18)
-            cw = random.uniform(160, 280)
-            ch = random.uniform(55, 100)
-            spd = random.uniform(150, 260)
-            self._clouds.append(
-                _Cloud(cx, cy, cw, ch, spd * (-side), layer=1, target_x=target_x)
-            )
+        # Layer 0 — far back (large clouds, slow) — 4 clouds
+        sprite = cloud_sprites.get("large")
+        if sprite:
+            for i in range(4):
+                target_x = (w / 5) * (i + 1) - sprite.get_width() * 0.3 + random.uniform(-40, 40)
+                side = -1 if i % 2 == 0 else 1
+                start_x = side * (w + random.uniform(100, 300))
+                cy = random.uniform(-20, self.screen_height * 0.08)
+                spd = random.uniform(100, 170)
+                scale = random.uniform(0.5, 0.7)
+                self._clouds.append(_SpriteCloud(
+                    sprite, start_x, target_x, cy, spd, layer=0, scale=scale
+                ))
 
-        # Layer 2 - front (smaller, fastest) — 5 clouds spread
-        layer2_count = 5
-        for i in range(layer2_count):
-            target_x = (w / (layer2_count + 1)) * (i + 1) + random.uniform(-25, 25)
-            side = -1 if i % 2 == 0 else 1
-            cx = side * (w * 0.55 + random.uniform(60, 250))  # start off-screen
-            cy = random.uniform(self.screen_height * 0.01, self.screen_height * 0.13)
-            cw = random.uniform(120, 200)
-            ch = random.uniform(40, 80)
-            spd = random.uniform(200, 340)
-            self._clouds.append(
-                _Cloud(cx, cy, cw, ch, spd * (-side), layer=2, target_x=target_x)
-            )
+        # Layer 1 — mid (medium clouds) — 5 clouds
+        sprite = cloud_sprites.get("medium")
+        if sprite:
+            for i in range(5):
+                target_x = (w / 6) * (i + 1) - sprite.get_width() * 0.25 + random.uniform(-30, 30)
+                side = -1 if i % 2 == 0 else 1
+                start_x = side * (w + random.uniform(80, 280))
+                cy = random.uniform(self.screen_height * 0.02, self.screen_height * 0.14)
+                spd = random.uniform(150, 260)
+                scale = random.uniform(0.4, 0.6)
+                self._clouds.append(_SpriteCloud(
+                    sprite, start_x, target_x, cy, spd, layer=1, scale=scale
+                ))
+
+        # Layer 2 — front (small, fast clouds) — 5 clouds
+        sprite = cloud_sprites.get("small")
+        if sprite:
+            for i in range(5):
+                target_x = (w / 6) * (i + 1) - sprite.get_width() * 0.2 + random.uniform(-25, 25)
+                side = -1 if i % 2 == 0 else 1
+                start_x = side * (w + random.uniform(60, 250))
+                cy = random.uniform(-10, self.screen_height * 0.10)
+                spd = random.uniform(200, 340)
+                scale = random.uniform(0.3, 0.5)
+                self._clouds.append(_SpriteCloud(
+                    sprite, start_x, target_x, cy, spd, layer=2, scale=scale
+                ))
 
     def _update_clouds(self, dt: float) -> None:
         dur = _PHASE_DURATIONS[IntroPhase.CLOUDS_GATHER]
         t = min(self.phase_timer / dur, 1.0)
-        eased = _ease_in_out(t)
 
         for cloud in self._clouds:
-            # Move toward each cloud's own target position (not all to centre)
-            diff = cloud.target_x - cloud.x
-            approach_speed = abs(cloud.speed) * (1.0 + (1.0 - eased) * 1.5)
-            if abs(diff) > 2.0:
-                direction = 1.0 if diff > 0 else -1.0
-                cloud.x += direction * approach_speed * dt
-                # Don't overshoot
-                if (direction > 0 and cloud.x > cloud.target_x) or \
-                   (direction < 0 and cloud.x < cloud.target_x):
-                    cloud.x = cloud.target_x
-            else:
-                cloud.x = _lerp(cloud.x, cloud.target_x, dt * 2.0)
-            # Gentle vertical drift
-            cloud.y += (
-                math.sin(self.global_timer * 0.7 + cloud.turbulence_offset)
-                * 3.0 * dt
-            )
+            cloud.update(dt, t, self.global_timer)
 
         # Ramp wind & rain gradually
+        eased = _ease_in_out(t)
         self._wind = _lerp(0, -60, eased)
         self._rain_intensity = _lerp(0.0, 0.4, eased)
 
@@ -767,31 +850,33 @@ class StormIntroSequence:
         alpha = int(160 + 95 * overall_t)
         flash = self._lightning_flash
 
-        for layer in layers:
-            for cloud in self._clouds:
-                if cloud.layer == layer:
-                    cloud.render(
-                        surface, alpha, self.global_timer,
-                        lightning_flash=flash,
-                    )
+        for cloud in self._clouds:
+            if cloud.layer not in layers:
+                continue
+
+            # During lightning, brighten clouds
+            render_alpha = alpha
+            if flash > 0:
+                render_alpha = min(255, int(alpha + flash * 80))
+
+            cloud.render(surface, render_alpha)
 
     # ------------------------------------------------------------------
-    # Rain (always-running subsystem)
+    # Rain (procedural particles)
     # ------------------------------------------------------------------
 
     def _update_rain(self, dt: float) -> None:
-        spawn_rate = self._rain_intensity * 350  # drops per second
-        spawn_count = int(spawn_rate * dt)
-        if random.random() < (spawn_rate * dt) % 1:
-            spawn_count += 1
+        if self._rain_intensity <= 0:
+            return
 
-        ground_y = self._dog_ground_y + 64
-        for _ in range(spawn_count):
-            x = random.uniform(-30, self.screen_width + 30)
-            y = random.uniform(-20, -5)
-            self._rain.append(
-                _RainDrop(x, y, self._wind, max(0.3, self._rain_intensity))
-            )
+        ground_y = self._dog_ground_y + 80
+
+        # Spawn new drops
+        spawn_rate = int(self._rain_intensity * 200 * dt)
+        for _ in range(spawn_rate):
+            x = random.uniform(-50, self.screen_width + 50)
+            y = random.uniform(-40, -5)
+            self._rain.append(_RainDrop(x, y, self._wind, self._rain_intensity))
 
         # Update existing
         alive = []
@@ -817,42 +902,67 @@ class StormIntroSequence:
         surface.blit(rain_surf, (0, 0))
 
     # ------------------------------------------------------------------
-    # Lightning bolts (always-running subsystem)
+    # Vignette overlay
+    # ------------------------------------------------------------------
+
+    def _render_vignette(self, surface: pygame.Surface) -> None:
+        """Render cinematic vignette, ramping up as storm intensifies."""
+        vignette = self._get_asset("vignette_overlay")
+        if not vignette:
+            return
+
+        t = min(self.progress * 1.2, 1.0)
+        if t < 0.1:
+            return
+
+        scaled = pygame.transform.smoothscale(
+            vignette, (self.screen_width, self.screen_height)
+        )
+        alpha = int(t * 200)
+        scaled.set_alpha(alpha)
+        surface.blit(scaled, (0, 0))
+
+    # ------------------------------------------------------------------
+    # Lightning (sprite-based bolts + flash overlay)
     # ------------------------------------------------------------------
 
     def _spawn_bolt(self) -> None:
-        """Generate a new bolt and add it to active list."""
-        start = (
-            self.screen_width * random.uniform(0.2, 0.8),
-            random.uniform(5, 50),
-        )
-        end = (
-            start[0] + random.uniform(-120, 120),
-            self._dog_ground_y + 50,
-        )
-        points = _generate_bolt(start, end, detail=7, offset_scale=95.0)
-        branches = _generate_branches(
-            points, branch_chance=0.35, branch_length=90.0
-        )
-        bloom = _GroundBloom(end[0], end[1] - 10)
+        """Spawn a sprite-based lightning bolt at a random position."""
+        bolt_sprite = self._get_asset("lightning_bolt")
 
-        self._bolts.append({
-            "points": points,
-            "branches": branches,
-            "alpha": 0,
-            "bloom": bloom,
-            "age": 0.0,
-            "duration": random.uniform(0.5, 0.7),
-        })
+        # Random horizontal position (20-80% of screen width)
+        x = self.screen_width * random.uniform(0.15, 0.85)
+
+        # Ground bloom at strike point
+        strike_y = self._dog_ground_y + 50
+        bloom = _GroundBloom(x, strike_y)
+        self._ground_blooms.append(bloom)
+
+        if bolt_sprite:
+            # Scale bolt to reach from top of screen to ground
+            bolt_h = int(strike_y + 20)
+            bolt_w = int(bolt_sprite.get_width() * (bolt_h / bolt_sprite.get_height()))
+            scaled = pygame.transform.smoothscale(bolt_sprite, (bolt_w, bolt_h))
+
+            self._active_bolts.append({
+                "sprite": scaled,
+                "x": x - bolt_w // 2,
+                "y": 0,
+                "alpha": 0,
+                "age": 0.0,
+                "duration": random.uniform(0.5, 0.7),
+            })
+
         self._shake.trigger(intensity=12.0, decay=7.0)
         self._lightning_flash = 1.0
 
-    def _update_bolts(self, dt: float) -> None:
+    def _update_lightning(self, dt: float) -> None:
+        """Update all active bolts and the global flash."""
         # Decay global flash
         self._lightning_flash = max(0.0, self._lightning_flash - dt * 4.0)
 
         alive = []
-        for bolt in self._bolts:
+        for bolt in self._active_bolts:
             bolt["age"] += dt
             t = bolt["age"] / bolt["duration"]
             # Flash-in -> hold -> fade
@@ -863,74 +973,52 @@ class StormIntroSequence:
             else:
                 bolt["alpha"] = int(255 * max(0.0, 1.0 - (t - 0.35) / 0.65))
 
-            bolt["bloom"].update(dt)
-            if bolt["alpha"] > 0 or bolt["bloom"].alive:
+            if bolt["alpha"] > 0:
                 alive.append(bolt)
-        self._bolts = alive
+        self._active_bolts = alive
 
-    def _render_bolts(self, surface: pygame.Surface) -> None:
-        """Render all active bolts with glow layers and bloom."""
-        if not self._bolts:
-            return
+        # Update ground blooms
+        alive_blooms = []
+        for bloom in self._ground_blooms:
+            bloom.update(dt)
+            if bloom.alive:
+                alive_blooms.append(bloom)
+        self._ground_blooms = alive_blooms
 
-        # Global flash tint
+    def _render_lightning(self, surface: pygame.Surface) -> None:
+        """Render sprite-based lightning bolts and flash overlay."""
+        # Global flash overlay
         if self._lightning_flash > 0.02:
-            flash_alpha = int(self._lightning_flash * 80)
-            flash_surf = pygame.Surface(
-                (self.screen_width, self.screen_height), pygame.SRCALPHA
-            )
-            flash_surf.fill((*_FLASH_TINT, flash_alpha))
-            surface.blit(flash_surf, (0, 0))
+            flash_sprite = self._get_asset("lightning_flash")
+            if flash_sprite:
+                scaled = pygame.transform.smoothscale(
+                    flash_sprite, (self.screen_width, self.screen_height)
+                )
+                flash_alpha = int(self._lightning_flash * 180)
+                scaled.set_alpha(flash_alpha)
+                surface.blit(scaled, (0, 0))
+            else:
+                # Fallback: simple white flash
+                flash_alpha = int(self._lightning_flash * 80)
+                flash_surf = pygame.Surface(
+                    (self.screen_width, self.screen_height), pygame.SRCALPHA
+                )
+                flash_surf.fill((200, 210, 255, flash_alpha))
+                surface.blit(flash_surf, (0, 0))
 
-        bolt_surf = pygame.Surface(
-            (self.screen_width, self.screen_height), pygame.SRCALPHA
-        )
-
-        for bolt in self._bolts:
+        # Render each active bolt sprite
+        for bolt in self._active_bolts:
             alpha = bolt["alpha"]
             if alpha <= 0:
-                bolt["bloom"].render(surface)
                 continue
+            sprite = bolt["sprite"]
+            temp = sprite.copy()
+            temp.set_alpha(alpha)
+            surface.blit(temp, (int(bolt["x"]), int(bolt["y"])))
 
-            pts = bolt["points"]
-            branches = bolt["branches"]
-            if len(pts) < 2:
-                continue
-
-            int_pts = [(int(p[0]), int(p[1])) for p in pts]
-
-            # Outer glow (wide, soft)
-            outer_col = (*_BOLT_OUTER_GLOW, int(alpha * 0.25))
-            pygame.draw.lines(bolt_surf, outer_col, False, int_pts, 10)
-
-            # Inner glow
-            inner_col = (*_BOLT_INNER_GLOW, int(alpha * 0.55))
-            pygame.draw.lines(bolt_surf, inner_col, False, int_pts, 5)
-
-            # Core bolt (bright, thin)
-            core_col = (*_BOLT_CORE, alpha)
-            pygame.draw.lines(bolt_surf, core_col, False, int_pts, 2)
-
-            # Branches
-            for branch in branches:
-                if len(branch) < 2:
-                    continue
-                b_pts = [(int(p[0]), int(p[1])) for p in branch]
-                pygame.draw.lines(
-                    bolt_surf,
-                    (*_BOLT_INNER_GLOW, int(alpha * 0.4)),
-                    False, b_pts, 3,
-                )
-                pygame.draw.lines(
-                    bolt_surf,
-                    (*_BOLT_CORE, int(alpha * 0.7)),
-                    False, b_pts, 1,
-                )
-
-            # Ground bloom
-            bolt["bloom"].render(bolt_surf)
-
-        surface.blit(bolt_surf, (0, 0))
+        # Ground blooms
+        for bloom in self._ground_blooms:
+            bloom.render(surface)
 
     # ------------------------------------------------------------------
     # Phase: Lightning Strike
@@ -976,13 +1064,40 @@ class StormIntroSequence:
         overlay = pygame.Surface(
             (self.screen_width, self.screen_height), pygame.SRCALPHA
         )
-        # Colour temperature shift: positive = warmer, negative = cooler
         r_shift = int(self._flicker_temp_shift * 40)
         base_r = min(255, max(0, 255 + r_shift))
         base_b = min(255, max(0, 255 - r_shift))
         alpha = int(self._flicker_flash * 160)
         overlay.fill((base_r, 255, base_b, alpha))
         surface.blit(overlay, (0, 0))
+
+    # ------------------------------------------------------------------
+    # Ground rendering (sprite-based)
+    # ------------------------------------------------------------------
+
+    def _render_ground(self, surface: pygame.Surface) -> None:
+        """Render the ground scene sprite at the bottom of the screen."""
+        ground = self._get_asset("ground_scene")
+        if ground:
+            ground_w = self.screen_width
+            aspect = ground.get_height() / max(ground.get_width(), 1)
+            ground_h = max(1, int(ground_w * aspect))
+            scaled = pygame.transform.smoothscale(ground, (ground_w, ground_h))
+            ground_y = self.screen_height - ground_h
+            surface.blit(scaled, (0, ground_y))
+        else:
+            # Fallback: procedural ground
+            ground_y = int(self._dog_ground_y) + 64
+            t = min(self.progress * 1.2, 1.0)
+            dirt = _lerp_color((101, 67, 33), (50, 35, 18), t)
+            pygame.draw.rect(
+                surface, dirt,
+                (0, ground_y, self.screen_width, self.screen_height - ground_y),
+            )
+            grass = _lerp_color((34, 139, 34), (18, 70, 18), t)
+            pygame.draw.rect(
+                surface, grass, (0, ground_y - 4, self.screen_width, 8)
+            )
 
     # ------------------------------------------------------------------
     # Phase: Dogs March
@@ -1005,20 +1120,16 @@ class StormIntroSequence:
 
         self._march_bob_timer += dt
 
-        # Footstep dust puffs for both dogs
+        # Footstep dust puffs
         step_dist = 28
         if abs(self._dog1_current_x - self._last_step_x1) >= step_dist and t < 0.85:
             foot_y = self._dog_ground_y + 58
-            self._dust_puffs.append(
-                _DustPuff(self._dog1_current_x + 20, foot_y)
-            )
+            self._dust_puffs.append(_DustPuff(self._dog1_current_x + 20, foot_y))
             self._last_step_x1 = self._dog1_current_x
 
         if abs(self._dog2_current_x - self._last_step_x2) >= step_dist and t < 0.85:
             foot_y = self._dog_ground_y + 58
-            self._dust_puffs.append(
-                _DustPuff(self._dog2_current_x + 40, foot_y)
-            )
+            self._dust_puffs.append(_DustPuff(self._dog2_current_x + 40, foot_y))
             self._last_step_x2 = self._dog2_current_x
 
         alive = []
@@ -1062,7 +1173,6 @@ class StormIntroSequence:
         )
 
         # --- Dog 2 (from right, faces left) ---
-        # Offset the bob slightly so they aren't perfectly in-sync
         bob_y2 = math.sin(self._march_bob_timer * 14.0 + 1.0) * 3.5
         tilt2 = math.sin(self._march_bob_timer * 14.0 + 1.0 + math.pi * 0.5) * 1.5
         self._render_single_dog(
@@ -1070,51 +1180,19 @@ class StormIntroSequence:
             facing_right=False, bob_y=bob_y2, tilt=tilt2,
         )
 
-        # "TREAT STORM!" title
-        if self._title_alpha > 0 and self._title_font:
-            text = "TREAT STORM!"
-            base_size = 64
-            scaled_size = max(16, int(base_size * self._title_scale))
-            font = pygame.font.Font(None, scaled_size)
+        # "TREAT STORM!" title (sprite-based)
+        self._render_title(surface)
 
-            # Shadow — use SRCALPHA surface to avoid set_alpha() issues on macOS SDL2 Metal
-            shadow_raw = font.render(text, True, (0, 0, 0))
-            shadow = shadow_raw.convert_alpha()
-            shadow.set_alpha(self._title_alpha // 2)
-            sx = (self.screen_width - shadow.get_width()) // 2 + 3
-            sy = self.screen_height // 2 - shadow.get_height() // 2 - 60 + 3
-            surface.blit(shadow, (sx, sy))
-
-            # Main text (gold)
-            main_raw = font.render(text, True, (255, 200, 50))
-            main = main_raw.convert_alpha()
-            main.set_alpha(self._title_alpha)
-            mx = (self.screen_width - main.get_width()) // 2
-            my = self.screen_height // 2 - main.get_height() // 2 - 60
-            surface.blit(main, (mx, my))
-
-        # "GO!" text
-        if self._go_alpha > 0 and self._go_font:
-            go_text_raw = self._go_font.render("GO!", True, (255, 230, 50))
-            go_shadow_raw = self._go_font.render("GO!", True, (80, 60, 0))
-            go_shadow = go_shadow_raw.convert_alpha()
-            go_text = go_text_raw.convert_alpha()
-            go_shadow.set_alpha(self._go_alpha)
-            go_text.set_alpha(self._go_alpha)
-
-            gx = (self.screen_width - go_text.get_width()) // 2
-            gy = self.screen_height // 2 - go_text.get_height() // 2 - 20
-            surface.blit(go_shadow, (gx + 4, gy + 4))
-            surface.blit(go_text, (gx, gy))
+        # "GO!" text (sprite-based)
+        self._render_go(surface)
 
     def _render_single_dog(
         self, surface: pygame.Surface, sprite: Optional[pygame.Surface],
         x: float, facing_right: bool, bob_y: float, tilt: float,
     ) -> None:
         """Render one dog with shadow, bob, and tilt."""
-        # The grass is at _dog_ground_y + 64, so position dog's bottom there
         grass_y = self._dog_ground_y + 64
-        
+
         # Shadow
         shadow_w, shadow_h = 60, 12
         shadow_x = int(x + 2)
@@ -1127,59 +1205,86 @@ class StormIntroSequence:
 
         if sprite:
             frame = sprite
+            if self._dog_render_scale != 1.0:
+                scaled_w = max(1, int(frame.get_width() * self._dog_render_scale))
+                scaled_h = max(1, int(frame.get_height() * self._dog_render_scale))
+                frame = pygame.transform.smoothscale(frame, (scaled_w, scaled_h))
             if not facing_right:
                 frame = pygame.transform.flip(frame, True, False)
             if abs(tilt) > 0.3:
                 frame = pygame.transform.rotate(frame, tilt)
-            
-            # Position so the dog's bottom is at the grass line
-            # Add small downward offset to sit directly on grass
+
             sprite_height = frame.get_height()
-            dog_y = grass_y - sprite_height + bob_y + 8
-            
-            surface.blit(
-                frame,
-                (int(x), int(dog_y)),
-            )
+            dog_y = grass_y - sprite_height + bob_y + int(8 * self._dog_render_scale)
+            surface.blit(frame, (int(x), int(dog_y)))
+
+    def _render_title(self, surface: pygame.Surface) -> None:
+        """Render the 'TREAT STORM!' title sprite with scale & alpha animation."""
+        if self._title_alpha <= 0:
+            return
+
+        title_sprite = self._get_asset("title_treat_storm")
+        if title_sprite:
+            # Scale the sprite
+            base_w, base_h = title_sprite.get_size()
+            target_w = int(self.screen_width * 0.65)
+            aspect = base_h / base_w
+            target_h = int(target_w * aspect)
+            scaled_w = int(target_w * self._title_scale)
+            scaled_h = int(target_h * self._title_scale)
+            if scaled_w > 0 and scaled_h > 0:
+                scaled = pygame.transform.smoothscale(title_sprite, (scaled_w, scaled_h))
+                scaled.set_alpha(self._title_alpha)
+                tx = (self.screen_width - scaled_w) // 2
+                ty = self.screen_height // 2 - scaled_h // 2 - 60
+                surface.blit(scaled, (tx, ty))
         else:
-            # No sprite provided — skip (no brown box fallback)
-            pass
+            # Fallback: procedural text
+            if self._title_alpha > 0:
+                base_size = 64
+                scaled_size = max(16, int(base_size * self._title_scale))
+                font = pygame.font.Font(None, scaled_size)
+                text = "TREAT STORM!"
+                # Shadow
+                shadow_raw = font.render(text, True, (0, 0, 0))
+                shadow = shadow_raw.convert_alpha()
+                shadow.set_alpha(self._title_alpha // 2)
+                sx = (self.screen_width - shadow.get_width()) // 2 + 3
+                sy = self.screen_height // 2 - shadow.get_height() // 2 - 60 + 3
+                surface.blit(shadow, (sx, sy))
 
-    # ------------------------------------------------------------------
-    # Shared rendering helpers
-    # ------------------------------------------------------------------
+                main_raw = font.render(text, True, (255, 200, 50))
+                main = main_raw.convert_alpha()
+                main.set_alpha(self._title_alpha)
+                mx = (self.screen_width - main.get_width()) // 2
+                my = self.screen_height // 2 - main.get_height() // 2 - 60
+                surface.blit(main, (mx, my))
 
-    def _render_sky(self, surface: pygame.Surface) -> None:
-        """Gradient sky that darkens as the storm builds."""
-        t = min(self.progress * 1.25, 1.0)
-        top = _lerp_color(_SKY_CLEAR_TOP, _SKY_STORM_TOP, t)
-        bot = _lerp_color(_SKY_CLEAR_BOT, _SKY_STORM_BOT, t)
+    def _render_go(self, surface: pygame.Surface) -> None:
+        """Render the 'GO!' sprite with alpha animation."""
+        if self._go_alpha <= 0:
+            return
 
-        for y in range(self.screen_height):
-            ratio = y / self.screen_height
-            color = _lerp_color(top, bot, ratio)
-            pygame.draw.line(surface, color, (0, y), (self.screen_width, y))
-
-    def _render_ground(self, surface: pygame.Surface) -> None:
-        ground_y = int(self._dog_ground_y) + 64
-        t = min(self.progress * 1.2, 1.0)
-
-        # Dirt darkens with storm
-        dirt = _lerp_color((101, 67, 33), (50, 35, 18), t)
-        pygame.draw.rect(
-            surface, dirt,
-            (0, ground_y, self.screen_width, self.screen_height - ground_y),
-        )
-
-        # Wet sheen on ground when raining
-        if self._rain_intensity > 0.3:
-            sheen_alpha = int(30 * self._rain_intensity)
-            sheen = pygame.Surface((self.screen_width, 6), pygame.SRCALPHA)
-            sheen.fill((150, 170, 200, sheen_alpha))
-            surface.blit(sheen, (0, ground_y))
-
-        # Grass strip
-        grass = _lerp_color((34, 139, 34), (18, 70, 18), t)
-        pygame.draw.rect(
-            surface, grass, (0, ground_y - 4, self.screen_width, 8)
-        )
+        go_sprite = self._get_asset("title_go")
+        if go_sprite:
+            target_w = int(self.screen_width * 0.3)
+            aspect = go_sprite.get_height() / go_sprite.get_width()
+            target_h = int(target_w * aspect)
+            scaled = pygame.transform.smoothscale(go_sprite, (target_w, target_h))
+            scaled.set_alpha(self._go_alpha)
+            gx = (self.screen_width - target_w) // 2
+            gy = self.screen_height // 2 - target_h // 2 - 20
+            surface.blit(scaled, (gx, gy))
+        else:
+            # Fallback: procedural text
+            go_font = pygame.font.Font(None, 110)
+            go_text_raw = go_font.render("GO!", True, (255, 230, 50))
+            go_shadow_raw = go_font.render("GO!", True, (80, 60, 0))
+            go_shadow = go_shadow_raw.convert_alpha()
+            go_text = go_text_raw.convert_alpha()
+            go_shadow.set_alpha(self._go_alpha)
+            go_text.set_alpha(self._go_alpha)
+            gx = (self.screen_width - go_text.get_width()) // 2
+            gy = self.screen_height // 2 - go_text.get_height() // 2 - 20
+            surface.blit(go_shadow, (gx + 4, gy + 4))
+            surface.blit(go_text, (gx, gy))

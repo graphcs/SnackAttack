@@ -298,7 +298,7 @@ class TreatAttackGameplay(BaseScreen):
         self.intro_sequence = StormIntroSequence(self.game_width, self.game_height)
         dog_sprite = self.dog._get_animation_controller().get_current_sprite() if self.dog else None
         self.intro_sequence.start(
-            dog_sprite=dog_sprite,
+            dog1_sprite=dog_sprite,
             dog_target_x=self.dog.x if self.dog else 300.0,
             dog_ground_y=self.dog.ground_y if self.dog else 650.0,
         )

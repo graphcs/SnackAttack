@@ -39,6 +39,7 @@ class MainMenuScreen(BaseScreen):
         self.logo_image: Optional[pygame.Surface] = None
         self.menu_ui_image: Optional[pygame.Surface] = None
         self.button_images: Dict[str, Optional[pygame.Surface]] = {
+            "single_dog_game": None,
             "1p_game": None,
             "2p_game": None,
             "settings": None,
@@ -66,10 +67,11 @@ class MainMenuScreen(BaseScreen):
         item_spacing = btn_height + 8
 
         self.menu_items = [
-            MenuItem("1 Player vs AI", "1p_game", start_y),
-            MenuItem("2 Players", "2p_game", start_y + item_spacing),
-            MenuItem("Settings", "settings", start_y + item_spacing * 2),
-            MenuItem("Quit", "quit", start_y + item_spacing * 3)
+            MenuItem("Single Dog", "single_dog_game", start_y),
+            MenuItem("1 Player vs AI", "1p_game", start_y + item_spacing),
+            MenuItem("2 Players", "2p_game", start_y + item_spacing * 2),
+            MenuItem("Settings", "settings", start_y + item_spacing * 3),
+            MenuItem("Quit", "quit", start_y + item_spacing * 4)
         ]
 
         self.selected_index = 0
@@ -121,13 +123,14 @@ class MainMenuScreen(BaseScreen):
             menu_ui_max_height = int(self.screen_height * 0.25)
             menu_ui_rect = self.menu_ui_image.get_rect()
             scale = min(menu_ui_max_width / menu_ui_rect.width, menu_ui_max_height / menu_ui_rect.height)
-            scale *= 1.4175  # Make menu UI 1.4175x bigger (1.35 * 1.05)
+            scale *= 1.5395  # Make menu UI 1.4175x bigger (1.35 * 1.05)
             new_width = int(menu_ui_rect.width * scale)
             new_height = int(menu_ui_rect.height * scale)
             self.menu_ui_image = pygame.transform.scale(self.menu_ui_image, (new_width, new_height))
 
         # Load button images
         button_files = {
+            "single_dog_game": "single_player.png",
             "1p_game": "1 play vs ai.png",
             "2p_game": "2 players.png",
             "settings": "settings button.png",
@@ -141,6 +144,14 @@ class MainMenuScreen(BaseScreen):
                 new_width = int(btn_img.get_width() * button_scale)
                 new_height = int(btn_img.get_height() * button_scale)
                 self.button_images[action] = pygame.transform.scale(btn_img, (new_width, new_height))
+
+        # The single-player asset has a much wider source size than the other buttons.
+        # Normalize it to the same rendered footprint as the existing 1P button.
+        if self.button_images.get("single_dog_game") and self.button_images.get("1p_game"):
+            target_size = self.button_images["1p_game"].get_size()
+            self.button_images["single_dog_game"] = pygame.transform.scale(
+                self.button_images["single_dog_game"], target_size
+            )
 
         # Load select indicator image
         select_path = os.path.join(ui_dir, "Select.png")
@@ -225,7 +236,10 @@ class MainMenuScreen(BaseScreen):
         """Activate the currently selected menu item."""
         action = self.menu_items[self.selected_index].action
 
-        if action == "1p_game":
+        if action == "single_dog_game":
+            self.state_machine.change_state(GameState.CHARACTER_SELECT,
+                                            {"mode": "single_dog", "vs_ai": False})
+        elif action == "1p_game":
             self.state_machine.change_state(GameState.CHARACTER_SELECT,
                                             {"mode": "1p", "vs_ai": True})
         elif action == "2p_game":
@@ -264,6 +278,8 @@ class MainMenuScreen(BaseScreen):
 
         # Menu items (button images on top of menu UI)
         center_x = self.screen_width // 2
+        fallback_source = self.button_images.get("1p_game")
+        fallback_size = fallback_source.get_size() if fallback_source else (420, 58)
 
         for item in self.menu_items:
             btn_img = self.button_images.get(item.action)
@@ -283,13 +299,28 @@ class MainMenuScreen(BaseScreen):
                     select_y = btn_y + (btn_rect.height - select_rect.height) // 2
                     surface.blit(self.select_indicator, (select_x, select_y))
             else:
-                # Fallback to text if no image
+                # Fallback to a styled button if no dedicated image exists.
+                btn_width, btn_height = fallback_size
+                btn_x = center_x - btn_width // 2
+                btn_y = item.y_position - btn_height // 2
+                item.rect = pygame.Rect(btn_x, btn_y, btn_width, btn_height)
+
+                fill_color = (111, 74, 50) if item.selected else (83, 56, 38)
+                border_color = (255, 210, 120) if item.selected else (180, 140, 95)
+                shadow_rect = item.rect.move(0, 4)
+                pygame.draw.rect(surface, (35, 22, 16), shadow_rect, border_radius=12)
+                pygame.draw.rect(surface, fill_color, item.rect, border_radius=12)
+                pygame.draw.rect(surface, border_color, item.rect, 3, border_radius=12)
+
                 color = self.selected_color if item.selected else self.text_color
-                if item.selected:
-                    self.draw_text(surface, "> ", self.menu_font, color,
-                                   (center_x - 120, item.y_position))
-                item.rect = self.draw_text(surface, item.text, self.menu_font, color,
-                                           (center_x, item.y_position))
+                self.draw_text(surface, item.text, self.menu_font, color,
+                               item.rect.center)
+
+                if item.selected and self.select_indicator:
+                    select_rect = self.select_indicator.get_rect()
+                    select_x = btn_x - select_rect.width - 6
+                    select_y = btn_y + (btn_height - select_rect.height) // 2
+                    surface.blit(self.select_indicator, (select_x, select_y))
 
         # Footer - use Daydream font
         footer_font = self.daydream_font_small if self.daydream_font_small else self.small_font
