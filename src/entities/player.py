@@ -1,6 +1,7 @@
 """Player entity - controlled by keyboard input."""
 
 import pygame
+import math
 import time
 from typing import Dict, Any, Tuple, Optional, List, TYPE_CHECKING
 
@@ -44,6 +45,13 @@ class Player:
         self.x = arena_bounds.centerx - self.width // 2
         self.y = arena_bounds.centery - self.height // 2
 
+        # Resting Y position — used to return to ground after flight ends
+        # (updated by gameplay screen when positioning on ground level)
+        self._resting_y = self.y
+
+        # How far up the dog can fly as a fraction of ground‑to‑top distance
+        self.FLIGHT_HEIGHT_FRACTION = 0.35
+
         # Movement - faster for larger screen
         self.base_move_speed = 350  # pixels per second
         self.velocity_x = 0
@@ -82,6 +90,12 @@ class Player:
 
         # Power-up visual effects manager (lazy initialization)
         self._vfx_manager: Optional['PowerUpVFXManager'] = None
+
+        # Free-flight state (active during boost / Red Bull)
+        self._flight_hover_offset = 0.0   # Current Y offset for hover bob
+        self._flight_lift_offset = 0.0    # Smooth lift transition (0 -> -15)
+        self._flight_tilt_angle = 0.0     # Head-tilt rotation in degrees
+        self._flight_time = 0.0           # Elapsed time for sinusoidal bob
 
     @property
     def rect(self) -> pygame.Rect:
@@ -135,6 +149,15 @@ class Player:
         """Check if player has boost effect active."""
         return any(e["type"] == "boost" for e in self.active_effects)
 
+    def get_flight_ceiling(self) -> float:
+        """Return the highest Y the dog may reach while flying.
+
+        Limited to FLIGHT_HEIGHT_FRACTION of the ground‑to‑top gap so dogs
+        hover modestly rather than flying to the very top of the arena.
+        """
+        max_lift = (self._resting_y - self.arena_bounds.top) * self.FLIGHT_HEIGHT_FRACTION
+        return self._resting_y - max_lift
+
     def _get_boost_sprite_override(self) -> Optional[pygame.Surface]:
         """Get single boost-wing sprite override, if available."""
         if not self.has_boost_effect():
@@ -146,6 +169,24 @@ class Player:
             self.character_id,
             self.facing_right,
         )
+
+    def _get_front_flight_sprite_override(self) -> Optional[pygame.Surface]:
+        """Get front-facing flight sprite while the dog is airborne during boost."""
+        if not self.has_boost_effect():
+            return None
+
+        height_above_ground = self._resting_y - self.y
+        is_airborne = height_above_ground > 12.0
+        strong_vertical_motion = (
+            abs(self.velocity_y) >= 80 and
+            abs(self.velocity_y) >= abs(self.velocity_x) * 0.75
+        )
+        if not is_airborne and not strong_vertical_motion:
+            return None
+
+        from ..sprites.sprite_sheet_loader import SpriteSheetLoader
+
+        return SpriteSheetLoader().get_front_flight_sprite(self.character_id)
 
     def apply_effect(self, effect_type: str, magnitude: float, duration: float) -> None:
         """Apply a power-up or penalty effect."""
@@ -201,7 +242,11 @@ class Player:
         dx = 0
         dy = 0
 
-        if not self.horizontal_only:
+        # Free-flight: allow vertical movement when boost is active,
+        # even in horizontal_only mode
+        can_move_vertical = not self.horizontal_only or self.has_boost_effect()
+
+        if can_move_vertical:
             if keys_pressed.get("up", False):
                 dy = -1
             if keys_pressed.get("down", False):
@@ -217,14 +262,22 @@ class Player:
             dx = -dx
             dy = -dy
 
-        # Normalize diagonal movement (only if not horizontal_only)
-        if not self.horizontal_only and dx != 0 and dy != 0:
+        # Normalize diagonal movement (only if vertical movement is allowed)
+        if can_move_vertical and dx != 0 and dy != 0:
             dx *= 0.707  # 1/sqrt(2)
             dy *= 0.707
 
         speed = self.base_move_speed * self.base_speed * self.get_speed_multiplier()
         self.velocity_x = dx * speed
-        self.velocity_y = dy * speed if not self.horizontal_only else 0
+        self.velocity_y = dy * speed if can_move_vertical else 0
+
+        # Soften upward velocity when approaching flight ceiling
+        if can_move_vertical and self.horizontal_only and self.velocity_y < 0:
+            ceiling = self.get_flight_ceiling()
+            margin = 30.0  # px – start dampening before hitting ceiling
+            if self.y <= ceiling + margin:
+                damp = max(0.0, (self.y - ceiling) / margin)
+                self.velocity_y *= damp
 
         # Update facing direction
         if dx > 0:
@@ -232,7 +285,7 @@ class Player:
         elif dx < 0:
             self.facing_right = False
 
-        self.is_moving = dx != 0 or (not self.horizontal_only and dy != 0)
+        self.is_moving = dx != 0 or (can_move_vertical and dy != 0)
 
     def update(self, dt: float) -> None:
         """Update player position and state."""
@@ -242,13 +295,28 @@ class Player:
             if self.leash_effect_timer <= 0:
                 self.reset_leash()
 
+        # Return-to-ground: when horizontal_only and NOT boosting, pull
+        # the dog back toward its resting Y so it doesn't float after flight.
+        if self.horizontal_only and not self.has_boost_effect():
+            diff = self._resting_y - self.y
+            if abs(diff) > 1.0:
+                # Smooth return: fast enough to not look sluggish
+                self.velocity_y = diff * 5.0  # spring-like pull
+            else:
+                self.y = self._resting_y
+                self.velocity_y = 0
+
         # Update position
         new_x = self.x + self.velocity_x * dt
         new_y = self.y + self.velocity_y * dt
 
         # Clamp to leash bounds (horizontal) and arena bounds (vertical)
         new_x = max(self.leash_min_x, min(new_x, self.leash_max_x))
-        new_y = max(self.arena_bounds.top, min(new_y, self.arena_bounds.bottom - self.height))
+        # Use flight ceiling instead of full arena top when boosting
+        min_y = self.arena_bounds.top
+        if self.horizontal_only and self.has_boost_effect():
+            min_y = self.get_flight_ceiling()
+        new_y = max(min_y, min(new_y, self.arena_bounds.bottom - self.height))
 
         self.x = new_x
         self.y = new_y
@@ -259,6 +327,9 @@ class Player:
         # Update effects
         self.update_effects(dt)
 
+        # Update free-flight visuals (hover bob, lift, tilt)
+        self._update_flight_state(dt)
+
         # Update steam particles
         self._update_steam_particles(dt)
 
@@ -266,7 +337,8 @@ class Player:
         self.vfx.update(
             dt, self.active_effects,
             self.x, self.y, self.width, self.height,
-            self.facing_right
+            self.facing_right,
+            is_flying=self.has_boost_effect()
         )
 
     def extend_leash(self, cross_arena_max_x: int = None) -> None:
@@ -298,6 +370,39 @@ class Player:
         self.leash_max_x = self.leash_base_max_x
         self.leash_effect_timer = 0.0
 
+    # ------------------------------------------------------------------
+    # Free-flight helpers (active during boost / Red Bull)
+    # ------------------------------------------------------------------
+
+    def _update_flight_state(self, dt: float) -> None:
+        """Update hover bob, lift offset, and tilt angle for flight mode."""
+        boosting = self.has_boost_effect()
+        if boosting:
+            self._flight_time += dt
+            # Sinusoidal hover bob (subtle up/down float)
+            self._flight_hover_offset = math.sin(self._flight_time * 3.0) * 6.0
+            # Smooth lift transition toward -15px (float above ground)
+            self._flight_lift_offset += (-15.0 - self._flight_lift_offset) * min(1.0, dt * 5.0)
+            # Tilt based on velocity: up -> tilt nose-up, down -> tilt nose-down
+            target_tilt = 0.0
+            if self.velocity_y < -50:
+                target_tilt = 8.0   # nose-up
+            elif self.velocity_y > 50:
+                target_tilt = -8.0  # nose-down
+            if self.velocity_x != 0:
+                # Slight lean forward/back in strafe direction
+                lean = 4.0 if self.velocity_x > 0 else -4.0
+                if not self.facing_right:
+                    lean = -lean
+                target_tilt += lean * 0.3
+            self._flight_tilt_angle += (target_tilt - self._flight_tilt_angle) * min(1.0, dt * 8.0)
+        else:
+            # Smoothly return to ground
+            self._flight_time = 0.0
+            self._flight_hover_offset *= max(0.0, 1.0 - dt * 6.0)
+            self._flight_lift_offset *= max(0.0, 1.0 - dt * 6.0)
+            self._flight_tilt_angle *= max(0.0, 1.0 - dt * 8.0)
+
     def get_leash_state(self) -> str:
         """Get current leash state for visual feedback."""
         if self.leash_effect_timer <= 0:
@@ -318,6 +423,7 @@ class Player:
         """Reset player to center of arena."""
         self.x = self.arena_bounds.centerx - self.width // 2
         self.y = self.arena_bounds.centery - self.height // 2
+        self._resting_y = self.y
         self.velocity_x = 0
         self.velocity_y = 0
 
@@ -331,6 +437,12 @@ class Player:
         self.reset_leash()
         self.steam_particles.clear()
         self.speed_lines.clear()
+
+        # Reset flight state
+        self._flight_hover_offset = 0.0
+        self._flight_lift_offset = 0.0
+        self._flight_tilt_angle = 0.0
+        self._flight_time = 0.0
 
         # Reset facing direction: player 1 faces right, player 2 faces left
         self.facing_right = (self.player_num == 1)
@@ -420,6 +532,10 @@ class Player:
         render_x = int(self.x - self.arena_bounds.left + offset[0])
         render_y = int(self.y - self.arena_bounds.top + offset[1])
 
+        # Apply free-flight visual offsets (hover bob + lift)
+        flight_y_offset = int(self._flight_lift_offset + self._flight_hover_offset)
+        render_y += flight_y_offset
+
         # Adjust Prissy's position slightly downward
         if self.character_id == 'prissy':
             render_y += 15
@@ -433,11 +549,23 @@ class Player:
             cache = SpriteCache()
             sprite = cache.get_dog_sprite(self.character_id, self.facing_right)
 
-        # Use generated boost-wing sprite sheets when available
-        boost_sprite_override = self._get_boost_sprite_override()
-        using_boost_sheet = boost_sprite_override is not None
-        if boost_sprite_override is not None:
+        # Use generated boost-specific sprite overrides when available.
+        front_flight_override = self._get_front_flight_sprite_override()
+        boost_sprite_override = None if front_flight_override is not None else self._get_boost_sprite_override()
+        using_boost_sheet = front_flight_override is not None or boost_sprite_override is not None
+        if front_flight_override is not None:
+            sprite = front_flight_override
+        elif boost_sprite_override is not None:
             sprite = boost_sprite_override
+
+        # Apply head-tilt rotation during free-flight
+        if front_flight_override is None and abs(self._flight_tilt_angle) > 0.5:
+            rotated = pygame.transform.rotate(sprite, self._flight_tilt_angle)
+            # Re-centre after rotation (rotation expands bounding box)
+            old_center = sprite.get_rect(topleft=(render_x, render_y)).center
+            new_rect = rotated.get_rect(center=old_center)
+            render_x, render_y = new_rect.topleft
+            sprite = rotated
 
         # Handle invincibility flashing
         if self.is_invincible:
@@ -485,7 +613,8 @@ class Player:
             self.width, self.height, self.active_effects,
             self.arena_bounds.left, self.arena_bounds.top, offset,
             facing_right=self.facing_right,
-            render_wings=not using_boost_sheet
+            render_wings=not using_boost_sheet,
+            is_flying=self.has_boost_effect()
         )
 
         # Draw the sprite

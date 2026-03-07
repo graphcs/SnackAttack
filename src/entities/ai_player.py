@@ -57,13 +57,27 @@ class AIPlayer(Player):
         if self.target_position:
             self.move_toward_target(dt)
 
+        # Return-to-ground: when horizontal_only and NOT boosting, pull
+        # the dog back toward its resting Y so it doesn't float after flight.
+        if self.horizontal_only and not self.has_boost_effect():
+            diff = self._resting_y - self.y
+            if abs(diff) > 1.0:
+                self.velocity_y = diff * 5.0  # spring-like pull
+            else:
+                self.y = self._resting_y
+                self.velocity_y = 0
+
         # Update position with velocity
         new_x = self.x + self.velocity_x * dt
         new_y = self.y + self.velocity_y * dt
 
         # Clamp to arena bounds
         new_x = max(self.arena_bounds.left, min(new_x, self.arena_bounds.right - self.width))
-        new_y = max(self.arena_bounds.top, min(new_y, self.arena_bounds.bottom - self.height))
+        # Use flight ceiling when boosting so dog doesn't fly to the very top
+        min_y = self.arena_bounds.top
+        if self.horizontal_only and self.has_boost_effect():
+            min_y = self.get_flight_ceiling()
+        new_y = max(min_y, min(new_y, self.arena_bounds.bottom - self.height))
 
         self.x = new_x
         self.y = new_y
@@ -73,6 +87,17 @@ class AIPlayer(Player):
 
         # Update effects
         self.update_effects(dt)
+
+        # Update free-flight visuals (hover bob, lift, tilt)
+        self._update_flight_state(dt)
+
+        # Update power-up VFX
+        self.vfx.update(
+            dt, self.active_effects,
+            self.x, self.y, self.width, self.height,
+            self.facing_right,
+            is_flying=self.has_boost_effect()
+        )
 
         # Check if target was collected or despawned
         if self.current_target and not self.current_target.active:
@@ -90,16 +115,19 @@ class AIPlayer(Player):
             self.current_target = None
             self.target_position = None
             # Wander randomly within arena
-            if self.horizontal_only:
+            can_move_vertical = not self.horizontal_only or self.has_boost_effect()
+            if not can_move_vertical:
                 # Only wander horizontally
                 self.target_position = (
                     random.randint(self.arena_bounds.left + 20, self.arena_bounds.right - 20),
                     self.y + self.height // 2  # Stay at current Y
                 )
             else:
+                # Wander within the allowed flight zone
+                ceil = int(self.get_flight_ceiling()) if self.horizontal_only else self.arena_bounds.top + 10
                 self.target_position = (
                     random.randint(self.arena_bounds.left + 10, self.arena_bounds.right - 10),
-                    random.randint(self.arena_bounds.top + 10, self.arena_bounds.bottom - 10)
+                    random.randint(ceil, self.arena_bounds.bottom - 10)
                 )
             return
 
@@ -194,11 +222,14 @@ class AIPlayer(Player):
             self.is_moving = False
             return
 
+        # Free-flight: allow vertical movement when boost is active
+        can_move_vertical = not self.horizontal_only or self.has_boost_effect()
+
         target_x, target_y = self.target_position
         center_x, center_y = self.center
 
         dx = target_x - center_x
-        dy = target_y - center_y if not self.horizontal_only else 0
+        dy = target_y - center_y if can_move_vertical else 0
         distance = math.sqrt(dx * dx + dy * dy)
 
         if distance < 5:
@@ -216,7 +247,7 @@ class AIPlayer(Player):
         # Apply pathfinding inefficiency (add some randomness)
         if random.random() > self.pathfinding_efficiency:
             dx += random.uniform(-0.3, 0.3)
-            if not self.horizontal_only:
+            if can_move_vertical:
                 dy += random.uniform(-0.3, 0.3)
             # Re-normalize
             length = math.sqrt(dx * dx + dy * dy)
@@ -233,7 +264,7 @@ class AIPlayer(Player):
         speed = self.base_move_speed * self.base_speed * self.get_speed_multiplier()
 
         self.velocity_x = dx * speed
-        self.velocity_y = dy * speed if not self.horizontal_only else 0
+        self.velocity_y = dy * speed if can_move_vertical else 0
 
         # Update facing direction
         if dx > 0:
@@ -241,7 +272,7 @@ class AIPlayer(Player):
         elif dx < 0:
             self.facing_right = False
 
-        self.is_moving = abs(dx) > 0.1 or (not self.horizontal_only and abs(dy) > 0.1)
+        self.is_moving = abs(dx) > 0.1 or (can_move_vertical and abs(dy) > 0.1)
 
     def handle_input(self, keys_pressed: Dict[str, bool]) -> None:
         """AI doesn't use keyboard input - override to do nothing."""

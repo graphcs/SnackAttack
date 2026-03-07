@@ -105,6 +105,17 @@ class CharacterSelectScreen(BaseScreen):
         # Update initial selection visuals
         self._update_card_selections()
 
+    def _requires_second_selection(self) -> bool:
+        """Return whether this mode needs a second dog selection."""
+        return self.game_mode == "2p"
+
+    def _build_mode_data(self) -> Dict[str, Any]:
+        """Build state payload for screens that need mode context."""
+        return {
+            "mode": self.game_mode,
+            "vs_ai": self.vs_ai,
+        }
+
     def _create_character_cards(self) -> None:
         """Create character cards from config with dynamic scrollable layout."""
         characters = self.config.get_all_characters()
@@ -161,7 +172,7 @@ class CharacterSelectScreen(BaseScreen):
         """Update which cards are selected."""
         for i, card in enumerate(self.character_cards):
             card.selected_p1 = (i == self.p1_selection)
-            card.selected_p2 = (i == self.p2_selection) if not self.vs_ai else False
+            card.selected_p2 = (i == self.p2_selection) if self._requires_second_selection() else False
 
     def on_exit(self) -> None:
         """Clean up when leaving screen."""
@@ -309,7 +320,7 @@ class CharacterSelectScreen(BaseScreen):
                 # Handle click on Create Your Dog button
                 if self.create_dog_rect and self.create_dog_rect.collidepoint(event.pos):
                     self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "select"})
-                    self.state_machine.change_state(GameState.UPLOAD_AVATAR)
+                    self.state_machine.change_state(GameState.UPLOAD_AVATAR, self._build_mode_data())
                     return
 
                 # Handle click on character cards (using scrolled positions)
@@ -401,7 +412,7 @@ class CharacterSelectScreen(BaseScreen):
             return
 
         # For 2P mode with WASD for P1
-        if not self.vs_ai and self.active_player == 1:
+        if self._requires_second_selection() and self.active_player == 1:
             if key == pygame.K_a:
                 new_selection = max(0, current - 1)
             elif key == pygame.K_d:
@@ -440,7 +451,7 @@ class CharacterSelectScreen(BaseScreen):
         """Confirm current player's selection."""
         if self.active_player == 1:
             self.p1_confirmed = True
-            if self.vs_ai:
+            if not self._requires_second_selection():
                 # Go directly to game with default difficulty (medium)
                 self._start_game()
             else:
@@ -454,7 +465,7 @@ class CharacterSelectScreen(BaseScreen):
 
     def _go_back(self) -> None:
         """Go back to previous state or screen."""
-        if self.p1_confirmed and not self.vs_ai:
+        if self.p1_confirmed and self._requires_second_selection():
             self.p1_confirmed = False
             self.active_player = 1
             self.p2_selection = None  # Reset P2 selection
@@ -468,17 +479,18 @@ class CharacterSelectScreen(BaseScreen):
         self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "start"})
 
         p1_char = self.character_cards[self.p1_selection].config
+        p2_char = None
+        difficulty = None
 
-        if self.vs_ai:
+        if self.game_mode == "1p":
             # AI gets a random character different from P1
             import random
             available = [c for i, c in enumerate(self.character_cards)
                          if i != self.p1_selection]
             p2_char = random.choice(available).config if available else p1_char
             difficulty = "medium"  # Default difficulty
-        else:
+        elif self._requires_second_selection():
             p2_char = self.character_cards[self.p2_selection].config
-            difficulty = None
 
         self.state_machine.change_state(GameState.GAMEPLAY, {
             "mode": self.game_mode,
@@ -508,7 +520,7 @@ class CharacterSelectScreen(BaseScreen):
             surface.blit(self.title_image, (title_x, title_y))
 
         # Player indicator
-        if not self.vs_ai and self.back_font:
+        if self._requires_second_selection() and self.back_font:
             indicator_y = int(self.screen_height * 0.33)
             if self.active_player == 1:
                 choose_text = "Player 1 Select"

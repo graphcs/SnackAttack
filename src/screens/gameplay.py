@@ -13,7 +13,7 @@ from ..entities.ai_player import AIPlayer
 from ..entities.snack import Snack
 from ..interaction.twitch_chat import TwitchChatManager, TWITCH_VOTE_EVENT
 from ..sprites.sprite_sheet_loader import AnimationState
-from ..effects.storm_intro import StormIntroSequence
+from ..effects.round_start_intro import RoundStartIntro
 from ..effects.powerup_vfx import SnackGlow
 
 from enum import Enum, auto
@@ -945,6 +945,7 @@ class GameplayScreen(BaseScreen):
         self.game_mode = "1p"
         self.vs_ai = True
         self.difficulty = "medium"
+        self.single_dog_mode = False
 
         self.current_level = 1
         self.current_round = 1
@@ -992,9 +993,9 @@ class GameplayScreen(BaseScreen):
         # Snack configs cache
         self.snack_configs: List[Dict[str, Any]] = []
 
-        # Control key states - horizontal only
-        self.p1_keys = {"left": False, "right": False}
-        self.p2_keys = {"left": False, "right": False}
+        # Control key states (up/down used during Red Bull flight)
+        self.p1_keys = {"left": False, "right": False, "up": False, "down": False}
+        self.p2_keys = {"left": False, "right": False, "up": False, "down": False}
 
         # Voting system for audience interaction
         self.voting_system: Optional[VotingSystem] = None
@@ -1110,8 +1111,9 @@ class GameplayScreen(BaseScreen):
         self.walk_in_custom_frame_timer = 0.0
 
         # Storm intro sequence (plays before countdown)
-        self.storm_intro: Optional[StormIntroSequence] = None
+        self.storm_intro: Optional[RoundStartIntro] = None
         self.storm_intro_active = False
+        self.skip_walk_in_after_intro = False
 
     def on_enter(self, data: Dict[str, Any] = None) -> None:
         """Initialize gameplay."""
@@ -1122,9 +1124,12 @@ class GameplayScreen(BaseScreen):
         data = data or {}
         self.game_mode = data.get("mode", "1p")
         self.vs_ai = data.get("vs_ai", True)
+        self.single_dog_mode = self.game_mode == "single_dog"
         self.difficulty = data.get("difficulty", "medium")
-        p1_char = data.get("p1_character", self.config.get_all_characters()[0])
-        p2_char = data.get("p2_character", self.config.get_all_characters()[1])
+        characters = self.config.get_all_characters()
+        p1_char = data.get("p1_character", characters[0])
+        default_p2 = characters[1] if len(characters) > 1 else characters[0]
+        p2_char = data.get("p2_character", default_p2)
 
         # Load snack configs
         self.snack_configs = self.config.get_all_snacks()
@@ -1147,6 +1152,14 @@ class GameplayScreen(BaseScreen):
 
         # Start storm intro sequence before countdown
         self._start_storm_intro()
+
+    def _has_opponent(self) -> bool:
+        """Return whether this match has a second active dog."""
+        return self.player2 is not None and self.arena2 is not None
+
+    def _uses_arrow_keys_for_player_one(self) -> bool:
+        """Return whether arrow keys should control player one."""
+        return self.vs_ai or self.single_dog_mode
 
     def _load_custom_font(self) -> None:
         """Load custom Daydream font for score and timer."""
@@ -1223,19 +1236,25 @@ class GameplayScreen(BaseScreen):
             new_height = int(self.cloud2_image.get_height() * 0.5)
             self.cloud2_image = pygame.transform.scale(self.cloud2_image, (new_width, new_height))
 
-    def _setup_arenas(self, p1_char: Dict, p2_char: Dict) -> None:
+    def _setup_arenas(self, p1_char: Dict, p2_char: Optional[Dict]) -> None:
         """Set up the game arenas and players."""
+        has_opponent = not self.single_dog_mode and p2_char is not None
+
         # Arena dimensions for game area (split-screen, not including chat panel)
         gap = -30  # Negative gap to overlap and bring battlefields closer
-        arena_width = (self.game_area_width - gap) // 2
+        shared_arena_width = (self.game_area_width - gap) // 2
+        arena_width = shared_arena_width
         arena_height = self.screen_height - 140  # Leave room for header and HUD
 
         # Calculate positions
         arena_y = 130  # Below header
 
         # Create arena bounds
-        arena1_bounds = pygame.Rect(0, arena_y, arena_width, arena_height)
-        arena2_bounds = pygame.Rect(arena_width + gap, arena_y, arena_width, arena_height)
+        arena1_x = 0 if has_opponent else (self.game_area_width - arena_width) // 2
+        arena1_bounds = pygame.Rect(arena1_x, arena_y, arena_width, arena_height)
+        arena2_bounds = None
+        if has_opponent:
+            arena2_bounds = pygame.Rect(arena_width + gap, arena_y, arena_width, arena_height)
 
         # Get level config
         level_config = self.config.get_level(self.current_level)
@@ -1249,22 +1268,28 @@ class GameplayScreen(BaseScreen):
         self.player1 = Player(p1_char, arena1_bounds, player_num=1, horizontal_only=True)
 
         # Create player 2 (AI or human) - horizontal movement only
-        if self.vs_ai:
+        self.player2 = None
+        if has_opponent and self.vs_ai:
             difficulty_config = self.config.get_difficulty(self.difficulty)
             self.player2 = AIPlayer(p2_char, arena2_bounds, difficulty_config, horizontal_only=True)
-        else:
+        elif has_opponent:
             self.player2 = Player(p2_char, arena2_bounds, player_num=2, horizontal_only=True)
 
         # Create arenas with battlefield images (use player-specific or fallback to shared)
         arena1_bg = self.battlefield1_image if self.battlefield1_image else self.battlefield_image
-        arena2_bg = self.battlefield2_image if self.battlefield2_image else self.battlefield_image
         self.arena1 = Arena(arena1_bounds, self.player1, level_config, arena1_bg)
-        self.arena2 = Arena(arena2_bounds, self.player2, level_config, arena2_bg)
+        self.arena2 = None
+        if has_opponent and arena2_bounds and self.player2:
+            arena2_bg = self.battlefield2_image if self.battlefield2_image else self.battlefield_image
+            self.arena2 = Arena(arena2_bounds, self.player2, level_config, arena2_bg)
 
         # Position players at ground level (offset for larger sprites - 216px now)
         ground_offset = 230
         self.player1.y = arena1_bounds.bottom - ground_offset
-        self.player2.y = arena2_bounds.bottom - ground_offset
+        self.player1._resting_y = self.player1.y
+        if self.player2 and arena2_bounds:
+            self.player2.y = arena2_bounds.bottom - ground_offset
+            self.player2._resting_y = self.player2.y
 
     def _setup_voting_ui(self) -> None:
         """Set up the voting system and UI components."""
@@ -1350,11 +1375,12 @@ class GameplayScreen(BaseScreen):
         self.countdown_timer = 1.0
         self.round_active = False
         self.walk_in_active = False
+        self.cloud_animation_done = False
 
         # Initialize cloud positions (off-screen)
         if self.cloud1_image:
             self.cloud1_x = -self.cloud1_image.get_width()  # Start off-screen left
-        if self.cloud2_image:
+        if self.cloud2_image and self.arena2:
             self.cloud2_x = self.game_area_width  # Start off-screen right
         self.cloud_animation_done = False
 
@@ -1382,12 +1408,16 @@ class GameplayScreen(BaseScreen):
         p1_has_walkin = p1_is_jazzy or p1_is_biggie or p1_is_prissy or p1_is_rex or p1_is_dash or p1_is_snowy or p1_is_custom
         p2_has_walkin = p2_is_jazzy or p2_is_biggie or p2_is_prissy or p2_is_rex or p2_is_dash or p2_is_snowy or p2_is_custom
         if self.player1:
-            if p1_has_walkin:
+            if self.skip_walk_in_after_intro:
+                self.player1.x = self.arena1.bounds.centerx - self.player1.width // 2
+            elif p1_has_walkin:
                 self.player1.x = -1000
             else:
                 self.player1.x = self.arena1.bounds.centerx - self.player1.width // 2
         if self.player2:
-            if p2_has_walkin:
+            if self.skip_walk_in_after_intro:
+                self.player2.x = self.arena2.bounds.centerx - self.player2.width // 2
+            elif p2_has_walkin:
                 self.player2.x = -1000
             else:
                 self.player2.x = self.arena2.bounds.centerx - self.player2.width // 2
@@ -1531,8 +1561,10 @@ class GameplayScreen(BaseScreen):
         ground_offset = 230
         if self.arena1:
             self.player1.y = self.arena1.bounds.bottom - ground_offset
+            self.player1._resting_y = self.player1.y
         if self.arena2:
             self.player2.y = self.arena2.bounds.bottom - ground_offset
+            self.player2._resting_y = self.player2.y
 
     def _update_walk_in(self, dt: float) -> None:
         """Update the walk-in animation."""
@@ -1603,7 +1635,8 @@ class GameplayScreen(BaseScreen):
 
         # Update walk-in positions (for rendering)
         self.walk_in_p1_x = self.walk_in_p1_start_x + (self.walk_in_p1_end_x - self.walk_in_p1_start_x) * eased_progress
-        self.walk_in_p2_x = self.walk_in_p2_start_x + (self.walk_in_p2_end_x - self.walk_in_p2_start_x) * eased_progress
+        if self.player2 and self.arena2:
+            self.walk_in_p2_x = self.walk_in_p2_start_x + (self.walk_in_p2_end_x - self.walk_in_p2_start_x) * eased_progress
 
         # Hide players that have walk-in animations
         # They're rendered via walk-in animation sprite instead
@@ -1637,16 +1670,17 @@ class GameplayScreen(BaseScreen):
         menu_bar_y = 200
         cloud_y = menu_bar_y - 60  # Above menu bar
 
-        # Cloud 1 target: left side of player 1's area
+        # Cloud 1 target: left side of player 1's area, or center in solo mode
         if self.cloud1_image:
-            cloud1_target_x = self.game_area_width // 4 - self.cloud1_image.get_width() // 2
+            target_fraction = 0.5 if self.single_dog_mode else 0.25
+            cloud1_target_x = int(self.game_area_width * target_fraction) - self.cloud1_image.get_width() // 2
             if self.cloud1_x < cloud1_target_x:
                 self.cloud1_x += cloud_speed * dt
                 if self.cloud1_x >= cloud1_target_x:
                     self.cloud1_x = cloud1_target_x
 
         # Cloud 2 target: right side of player 2's area
-        if self.cloud2_image:
+        if self.cloud2_image and self.arena2:
             cloud2_target_x = (self.game_area_width * 3) // 4 - self.cloud2_image.get_width() // 2
             if self.cloud2_x > cloud2_target_x:
                 self.cloud2_x -= cloud_speed * dt
@@ -1660,7 +1694,12 @@ class GameplayScreen(BaseScreen):
             self.arena2.cloud_spawn_x = self.cloud2_x + self.cloud2_image.get_width() // 2
 
         # Check if both clouds have reached their targets
-        if self.cloud1_image and self.cloud2_image:
+        if self.single_dog_mode:
+            if self.cloud1_image:
+                cloud1_target_x = self.game_area_width // 2 - self.cloud1_image.get_width() // 2
+                if self.cloud1_x >= cloud1_target_x:
+                    self.cloud_animation_done = True
+        elif self.cloud1_image and self.cloud2_image:
             cloud1_target_x = self.game_area_width // 4 - self.cloud1_image.get_width() // 2
             cloud2_target_x = (self.game_area_width * 3) // 4 - self.cloud2_image.get_width() // 2
             if self.cloud1_x >= cloud1_target_x and self.cloud2_x <= cloud2_target_x:
@@ -1670,23 +1709,29 @@ class GameplayScreen(BaseScreen):
         """Start the actual round."""
         self.round_timer = self.round_duration
         self.round_active = True
+        self.skip_walk_in_after_intro = False
         self.crowd_chaos_triggered = False
         self.crowd_chaos_active = False
         self.crowd_chaos_countdown_active = False
         self.crowd_chaos_countdown_timer = 0.0
         self.crowd_chaos_countdown_value = 0
         self.player1.reset()
-        self.player2.reset()
         self.arena1.snacks.clear()
-        self.arena2.snacks.clear()
         # Reset thunder sound flag for new round
         self.arena1.thunder_played_this_round = False
-        self.arena2.thunder_played_this_round = False
+        if self.player2:
+            self.player2.reset()
+        if self.arena2:
+            self.arena2.snacks.clear()
+            self.arena2.thunder_played_this_round = False
 
         # Reset player positions to ground
         ground_offset = 230
         self.player1.y = self.arena1.bounds.bottom - ground_offset
-        self.player2.y = self.arena2.bounds.bottom - ground_offset
+        self.player1._resting_y = self.player1.y
+        if self.player2 and self.arena2:
+            self.player2.y = self.arena2.bounds.bottom - ground_offset
+            self.player2._resting_y = self.player2.y
 
         # Configure the single Crowd Chaos voting type for this round
         if self.voting_system:
@@ -1777,14 +1822,32 @@ class GameplayScreen(BaseScreen):
         self.round_active = False
 
         # Determine winner
-        if self.player1.score > self.player2.score:
+        if self.single_dog_mode:
+            self.p1_round_wins += 1
+        elif self.player1.score > self.player2.score:
             self.p1_round_wins += 1
         elif self.player2.score > self.player1.score:
             self.p2_round_wins += 1
 
         # Check for game over
         wins_needed = (self.max_rounds // 2) + 1
-        if self.p1_round_wins >= wins_needed or self.p2_round_wins >= wins_needed:
+        if self.single_dog_mode:
+            if self.current_round >= self.max_rounds:
+                self._end_game()
+            else:
+                self.current_round += 1
+                # Progress level every round
+                if self.current_round <= 3:
+                    self.current_level = self.current_round
+                    level_config = self.config.get_level(self.current_level) or {}
+                    self.arena1.level_config = level_config
+                    self.arena1.snack_pool = level_config.get("snack_pool", ["pizza"])
+                    self.arena1.background_color = tuple(level_config.get("background_color", [200, 200, 200]))
+                    self.round_duration = level_config.get("round_duration_seconds", 60)
+                    self.arena1.fall_speed = 180 + (self.current_level - 1) * 30
+                    self.arena1.base_spawn_interval = max(0.5, 1.0 - (self.current_level - 1) * 0.15)
+                self._start_countdown()
+        elif self.p1_round_wins >= wins_needed or self.p2_round_wins >= wins_needed:
             self._end_game()
         elif self.current_round >= self.max_rounds:
             self._end_game()
@@ -1812,25 +1875,26 @@ class GameplayScreen(BaseScreen):
     def _end_game(self) -> None:
         """End the game and go to results screen."""
         winner = None
-        if self.p1_round_wins > self.p2_round_wins:
+        if self.single_dog_mode or self.p1_round_wins > self.p2_round_wins:
             winner = self.player1.name
         elif self.p2_round_wins > self.p1_round_wins:
             winner = self.player2.name
 
         self.state_machine.change_state(GameState.GAME_OVER, {
+            "mode": self.game_mode,
             "winner": winner,
             "p1_score": self.player1.score,
-            "p2_score": self.player2.score,
+            "p2_score": self.player2.score if self.player2 else 0,
             "p1_rounds": self.p1_round_wins,
             "p2_rounds": self.p2_round_wins,
             "vs_ai": self.vs_ai,
             "p1_name": self.player1.name,
-            "p2_name": self.player2.name
+            "p2_name": self.player2.name if self.player2 else ""
         })
 
     def _start_storm_intro(self) -> None:
         """Launch the lightning + treat storm intro before the countdown."""
-        self.storm_intro = StormIntroSequence(
+        self.storm_intro = RoundStartIntro(
             self.game_area_width, self.screen_height
         )
         # Use the first arena's ground level as reference
@@ -1838,20 +1902,29 @@ class GameplayScreen(BaseScreen):
         if self.arena1:
             ground_y = self.arena1.bounds.bottom - 80
 
-        # Grab idle frame from each player's animation controller
+        from ..sprites.sprite_sheet_loader import SpriteSheetLoader
+
+        loader = SpriteSheetLoader()
+        dog1_frames = []
+        dog2_frames = []
         dog1_sprite = None
         dog2_sprite = None
         if self.player1:
+            dog1_frames = loader.get_animation_frames(self.player1.character_id, "run", True)[:3]
             dog1_sprite = self.player1.animation_controller.get_current_sprite()
         if self.player2:
+            dog2_frames = loader.get_animation_frames(self.player2.character_id, "run", False)[:3]
             dog2_sprite = self.player2.animation_controller.get_current_sprite()
 
         self.storm_intro.start(
+            dog1_frames=dog1_frames,
+            dog2_frames=dog2_frames,
             dog1_sprite=dog1_sprite,
             dog2_sprite=dog2_sprite,
             dog_ground_y=ground_y,
         )
         self.storm_intro_active = True
+        self.skip_walk_in_after_intro = True
 
     def on_exit(self) -> None:
         """Clean up when leaving gameplay."""
@@ -1861,6 +1934,7 @@ class GameplayScreen(BaseScreen):
             self.twitch_manager = None
         self.storm_intro = None
         self.storm_intro_active = False
+        self.skip_walk_in_after_intro = False
 
     def handle_event(self, event: pygame.event.Event) -> None:
         """Handle input events."""
@@ -1911,46 +1985,70 @@ class GameplayScreen(BaseScreen):
                     self.chat_simulator.add_message(voter_id[:10], f"!{vote_type}", color)
 
     def _handle_key_down(self, key: int) -> None:
-        """Handle key press - horizontal only."""
+        """Handle key press."""
         # Player 1 controls (WASD)
         if key == pygame.K_a:
             self.p1_keys["left"] = True
         elif key == pygame.K_d:
             self.p1_keys["right"] = True
+        elif key == pygame.K_w:
+            self.p1_keys["up"] = True
+        elif key == pygame.K_s:
+            self.p1_keys["down"] = True
 
         # In 1P mode, arrow keys also control player 1
-        if self.vs_ai:
+        if self._uses_arrow_keys_for_player_one():
             if key == pygame.K_LEFT:
                 self.p1_keys["left"] = True
             elif key == pygame.K_RIGHT:
                 self.p1_keys["right"] = True
+            elif key == pygame.K_UP:
+                self.p1_keys["up"] = True
+            elif key == pygame.K_DOWN:
+                self.p1_keys["down"] = True
         else:
             # Player 2 controls (Arrow keys) - only for 2P mode
             if key == pygame.K_LEFT:
                 self.p2_keys["left"] = True
             elif key == pygame.K_RIGHT:
                 self.p2_keys["right"] = True
+            elif key == pygame.K_UP:
+                self.p2_keys["up"] = True
+            elif key == pygame.K_DOWN:
+                self.p2_keys["down"] = True
 
     def _handle_key_up(self, key: int) -> None:
-        """Handle key release - horizontal only."""
+        """Handle key release."""
         # Player 1 controls
         if key == pygame.K_a:
             self.p1_keys["left"] = False
         elif key == pygame.K_d:
             self.p1_keys["right"] = False
+        elif key == pygame.K_w:
+            self.p1_keys["up"] = False
+        elif key == pygame.K_s:
+            self.p1_keys["down"] = False
 
         # In 1P mode, arrow keys also control player 1
-        if self.vs_ai:
+        if self._uses_arrow_keys_for_player_one():
             if key == pygame.K_LEFT:
                 self.p1_keys["left"] = False
             elif key == pygame.K_RIGHT:
                 self.p1_keys["right"] = False
+            elif key == pygame.K_UP:
+                self.p1_keys["up"] = False
+            elif key == pygame.K_DOWN:
+                self.p1_keys["down"] = False
         else:
             # Player 2 controls
             if key == pygame.K_LEFT:
                 self.p2_keys["left"] = False
             elif key == pygame.K_RIGHT:
                 self.p2_keys["right"] = False
+            elif key == pygame.K_UP:
+                self.p2_keys["up"] = False
+            elif key == pygame.K_DOWN:
+                self.p2_keys["down"] = False
 
     def update(self, dt: float) -> None:
         """Update gameplay state."""
@@ -2012,8 +2110,10 @@ class GameplayScreen(BaseScreen):
                 self.countdown -= 1
                 self.countdown_timer = 1.0
                 if self.countdown == 0:
-                    # Start walk-in animation instead of immediately starting round
-                    self._start_walk_in()
+                    if self.skip_walk_in_after_intro:
+                        self._start_round()
+                    else:
+                        self._start_walk_in()
                 elif self.countdown == 2:
                     # Play countdown sound for "2" (uses 2&3 sound)
                     self.event_bus.emit(GameEvent.PLAY_SOUND, {"sound": "countdown_2_3"})
@@ -2108,15 +2208,16 @@ class GameplayScreen(BaseScreen):
         self.player1.handle_input(self.p1_keys)
         self.player1.update(dt)
 
-        if isinstance(self.player2, AIPlayer):
+        if isinstance(self.player2, AIPlayer) and self.arena2:
             self.player2.update(dt, self.arena2.snacks)
-        else:
+        elif self.player2:
             self.player2.handle_input(self.p2_keys)
             self.player2.update(dt)
 
         # Update arenas (spawns falling snacks)
         self.arena1.update(dt, self.snack_configs)
-        self.arena2.update(dt, self.snack_configs)
+        if self.arena2:
+            self.arena2.update(dt, self.snack_configs)
 
         # Check collisions
         self._check_collisions()
@@ -2125,7 +2226,7 @@ class GameplayScreen(BaseScreen):
         """Check for player-snack collisions."""
         # Use smaller hitboxes for tighter collision (shrink by 40px on each side)
         p1_hitbox = self.player1.rect.inflate(-80, -80)
-        p2_hitbox = self.player2.rect.inflate(-80, -80)
+        p2_hitbox = self.player2.rect.inflate(-80, -80) if self.player2 else None
 
         # Player 1 collisions with their own arena
         for snack in self.arena1.snacks[:]:
@@ -2136,16 +2237,17 @@ class GameplayScreen(BaseScreen):
                 self._collect_snack(self.player1, snack)
 
         # Player 2 collisions with their own arena
-        for snack in self.arena2.snacks[:]:
-            if not snack.active:
-                continue
-            snack_hitbox = snack.rect.inflate(-20, -20)
-            if p2_hitbox.colliderect(snack_hitbox):
-                self._collect_snack(self.player2, snack)
+        if self.player2 and self.arena2 and p2_hitbox:
+            for snack in self.arena2.snacks[:]:
+                if not snack.active:
+                    continue
+                snack_hitbox = snack.rect.inflate(-20, -20)
+                if p2_hitbox.colliderect(snack_hitbox):
+                    self._collect_snack(self.player2, snack)
 
         # Cross-arena collisions when unleashed!
         # Player 1 can steal from arena 2 if they've crossed over
-        if self.player1.get_leash_state() == "extended":
+        if self.player1.get_leash_state() == "extended" and self.arena2:
             for snack in self.arena2.snacks[:]:
                 if not snack.active:
                     continue
@@ -2154,7 +2256,7 @@ class GameplayScreen(BaseScreen):
                     self._collect_snack(self.player1, snack, stolen=True)
 
         # Player 2 can steal from arena 1 if they've crossed over
-        if self.player2.get_leash_state() == "extended":
+        if self.player2 and self.arena2 and p2_hitbox and self.player2.get_leash_state() == "extended":
             for snack in self.arena1.snacks[:]:
                 if not snack.active:
                     continue
@@ -2236,26 +2338,33 @@ class GameplayScreen(BaseScreen):
         
         if mode == VotingMode.ACTION:
             if vote_winner == "extend":
-                # Calculate how far into the OTHER arena each player can go
-                # Player 1 can go into arena 2's left portion
-                p1_cross_max = self.arena2.bounds.left + 150  # 150px into arena 2
-                # Player 2 can go into arena 1's right portion
-                p2_cross_max = self.arena1.bounds.right + 150  # This is arena2's extended range
+                if self.arena2 and self.player2:
+                    # Calculate how far into the OTHER arena each player can go
+                    # Player 1 can go into arena 2's left portion
+                    p1_cross_max = self.arena2.bounds.left + 150  # 150px into arena 2
+                    # Player 2 can go into arena 1's right portion
+                    p2_cross_max = self.arena1.bounds.right + 150  # This is arena2's extended range
 
-                self.player1.extend_leash(cross_arena_max_x=p1_cross_max)
-                self.player2.extend_leash(cross_arena_max_x=p2_cross_max)
+                    self.player1.extend_leash(cross_arena_max_x=p1_cross_max)
+                    self.player2.extend_leash(cross_arena_max_x=p2_cross_max)
 
-                if self.chat_simulator:
-                    self.chat_simulator.add_message("System", "LEASH EXTENDED!", (50, 200, 50))
-                    self.chat_simulator.add_message("System", "Dogs can CROSS!", (100, 255, 100))
-                # Trigger dramatic announcement
-                self.announcement_text = "UNLEASHED!"
+                    if self.chat_simulator:
+                        self.chat_simulator.add_message("System", "LEASH EXTENDED!", (50, 200, 50))
+                        self.chat_simulator.add_message("System", "Dogs can CROSS!", (100, 255, 100))
+                    self.announcement_text = "UNLEASHED!"
+                else:
+                    self.player1.extend_leash()
+                    if self.chat_simulator:
+                        self.chat_simulator.add_message("System", "LEASH EXTENDED!", (50, 200, 50))
+                        self.chat_simulator.add_message("System", "More room to roam!", (100, 255, 100))
+                    self.announcement_text = "LEASH EXTENDED!"
                 self.announcement_color = (50, 255, 50)
                 self.flash_color = (50, 200, 50)
                 
             elif vote_winner == "yank":
                 self.player1.yank_leash()
-                self.player2.yank_leash()
+                if self.player2:
+                    self.player2.yank_leash()
                 if self.chat_simulator:
                     self.chat_simulator.add_message("System", "LEASH YANKED!", (200, 50, 50))
                 # Trigger dramatic announcement
@@ -2285,14 +2394,15 @@ class GameplayScreen(BaseScreen):
                 self.arena1.voted_food_timer = self.arena1.voted_food_duration
                 self.arena1.voted_food_config = selected_snack
                 
-                self.arena2.pending_snack = selected_snack
-                self.arena2.pending_snack_x = self.arena2.bounds.centerx
-                self.arena2.pending_snack_scale = 1.5  # Make voted snacks 1.5x larger
-                self.arena2._trigger_lightning(self.arena2.pending_snack_x)
-                # Activate voted food spawning phase (spawn voted food for 5 seconds)
-                self.arena2.voted_food_active = True
-                self.arena2.voted_food_timer = self.arena2.voted_food_duration
-                self.arena2.voted_food_config = selected_snack
+                if self.arena2:
+                    self.arena2.pending_snack = selected_snack
+                    self.arena2.pending_snack_x = self.arena2.bounds.centerx
+                    self.arena2.pending_snack_scale = 1.5  # Make voted snacks 1.5x larger
+                    self.arena2._trigger_lightning(self.arena2.pending_snack_x)
+                    # Activate voted food spawning phase (spawn voted food for 5 seconds)
+                    self.arena2.voted_food_active = True
+                    self.arena2.voted_food_timer = self.arena2.voted_food_duration
+                    self.arena2.voted_food_config = selected_snack
                 
                 self.announcement_text = f"{vote_winner.upper()} DROP!"
                 self.announcement_color = (100, 200, 255)
@@ -2353,16 +2463,16 @@ class GameplayScreen(BaseScreen):
         # Doing it early to be under HUD or late to be over everything? 
         # Usually overlay effects are top level. Let's put it at the end of the method before Pause overlay.)
 
-        if self.cloud2_image:
+        if self.cloud2_image and self.arena2:
             surface.blit(self.cloud2_image, (int(self.cloud2_x), cloud_y))
 
         # Draw arenas (food layer)
-        if self.arena1 and self.arena2:
+        if self.arena1:
             arena1_surface = self.arena1.render()
-            arena2_surface = self.arena2.render()
-
             surface.blit(arena1_surface,
                          (self.arena1.bounds.x + shake_x, self.arena1.bounds.y + shake_y))
+        if self.arena2:
+            arena2_surface = self.arena2.render()
             surface.blit(arena2_surface,
                          (self.arena2.bounds.x + shake_x, self.arena2.bounds.y + shake_y))
 
@@ -2534,21 +2644,26 @@ class GameplayScreen(BaseScreen):
             self.draw_text(surface, timer_text, small_font, timer_color,
                            (left_x, round_y + 35), center=False)
 
-        # Round wins display centered "# vs #" with smaller "vs"
-        vs_font = self.daydream_font_smallest if self.daydream_font_smallest else font
-        # Render each part separately
-        p1_wins_surface = font.render(str(self.p1_round_wins), True, vs_color)
-        vs_surface = vs_font.render("vs", True, vs_color)
-        p2_wins_surface = font.render(str(self.p2_round_wins), True, vs_color)
+        if self.single_dog_mode:
+            rounds_cleared_text = f"round wins {self.p1_round_wins}"
+            rounds_surface = small_font.render(rounds_cleared_text, True, vs_color)
+            rounds_rect = rounds_surface.get_rect(center=(self.game_area_width // 2, info_y))
+            surface.blit(rounds_surface, rounds_rect)
+        else:
+            # Round wins display centered "# vs #" with smaller "vs"
+            vs_font = self.daydream_font_smallest if self.daydream_font_smallest else font
+            p1_wins_surface = font.render(str(self.p1_round_wins), True, vs_color)
+            vs_surface = vs_font.render("vs", True, vs_color)
+            p2_wins_surface = font.render(str(self.p2_round_wins), True, vs_color)
 
-        total_width = p1_wins_surface.get_width() + 8 + vs_surface.get_width() + 8 + p2_wins_surface.get_width()
-        start_x = (self.game_area_width - total_width) // 2
+            total_width = p1_wins_surface.get_width() + 8 + vs_surface.get_width() + 8 + p2_wins_surface.get_width()
+            start_x = (self.game_area_width - total_width) // 2
 
-        surface.blit(p1_wins_surface, (start_x, info_y - p1_wins_surface.get_height() // 2))
-        start_x += p1_wins_surface.get_width() + 8
-        surface.blit(vs_surface, (start_x, info_y - vs_surface.get_height() // 2))
-        start_x += vs_surface.get_width() + 8
-        surface.blit(p2_wins_surface, (start_x, info_y - p2_wins_surface.get_height() // 2))
+            surface.blit(p1_wins_surface, (start_x, info_y - p1_wins_surface.get_height() // 2))
+            start_x += p1_wins_surface.get_width() + 8
+            surface.blit(vs_surface, (start_x, info_y - vs_surface.get_height() // 2))
+            start_x += vs_surface.get_width() + 8
+            surface.blit(p2_wins_surface, (start_x, info_y - p2_wins_surface.get_height() // 2))
 
         # Get fonts for different sizes
         name_font = self.daydream_font_small if self.daydream_font_small else font  # 20px
@@ -2621,6 +2736,9 @@ class GameplayScreen(BaseScreen):
 
     def _render_crossed_players(self, surface: pygame.Surface, shake_x: int, shake_y: int) -> None:
         """Render players who have crossed into the gap or other arena."""
+        if not self.player2 or not self.arena2:
+            return
+
         # Check if player 1 has crossed into the gap or arena 2
         if self.player1.x + self.player1.width > self.arena1.bounds.right:
             # Player 1 is crossing! Render them on the main surface
@@ -2804,8 +2922,11 @@ class GameplayScreen(BaseScreen):
         if "UNLEASHED" in self.announcement_text:
             subtitle = "Dogs can cross into enemy territory!"
             subtitle2 = "Steal snacks for 50% BONUS!"
+        elif "EXTENDED" in self.announcement_text:
+            subtitle = "More room to roam!"
+            subtitle2 = None
         else:
-            subtitle = "Dogs movement is restricted!"
+            subtitle = "Dog movement is restricted!" if self.single_dog_mode else "Dogs movement is restricted!"
             subtitle2 = None
 
         subtitle_surf = subtitle_font.render(subtitle, True, (255, 255, 255))

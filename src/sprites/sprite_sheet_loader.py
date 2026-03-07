@@ -252,6 +252,27 @@ class SpriteSheetLoader:
 
         return None
 
+    def _get_front_flight_sprite_path(self, character_id: str) -> Optional[str]:
+        """Get path to generated front-facing flight sprite image."""
+        name = self.CHARACTER_NAMES.get(character_id, character_id.capitalize())
+        candidates = [
+            os.path.join(self._sprite_path, f"{name.lower()}_face_camera_flight.png"),
+        ]
+
+        custom_base = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), '..', '..', 'custom_avatars', character_id
+        )
+        candidates.extend([
+            os.path.join(custom_base, 'face_camera_flight.png'),
+            os.path.join(custom_base, 'flight_front.png'),
+        ])
+
+        for path in candidates:
+            if os.path.exists(path):
+                return path
+
+        return None
+
     def _load_sprite_sheet(self, filepath: str) -> Optional[pygame.Surface]:
         """Load a sprite sheet image."""
         try:
@@ -278,6 +299,98 @@ class SpriteSheetLoader:
             frame = sheet.subsurface(frame_rect).copy()
             frames.append(frame)
         return frames
+
+    @staticmethod
+    def _get_content_bounds(surface: pygame.Surface) -> Optional[pygame.Rect]:
+        """Get the bounding box of non-transparent pixels in a surface.
+
+        Returns:
+            Rect of the content area, or None if entirely transparent.
+        """
+        mask = pygame.mask.from_surface(surface, threshold=10)
+        bounding_rects = mask.get_bounding_rects()
+        if not bounding_rects:
+            return None
+        # Union all bounding rects (there should typically be just one)
+        combined = bounding_rects[0]
+        for r in bounding_rects[1:]:
+            combined.union_ip(r)
+        return combined
+
+    def _normalize_custom_frame(self, frame: pygame.Surface,
+                                target_size: Tuple[int, int]) -> pygame.Surface:
+        """Normalize a custom character frame so its content fill ratio
+        matches that of built-in characters (60-75% of the frame).
+
+        If the content fills less than 40% or more than 90% of the frame,
+        re-scale content to ~67% fill and re-centre within the target size.
+
+        Args:
+            frame: The scaled frame to normalize.
+            target_size: The desired output size (w, h).
+
+        Returns:
+            Normalized frame surface.
+        """
+        bounds = self._get_content_bounds(frame)
+        if bounds is None:
+            return frame
+
+        frame_w, frame_h = target_size
+        content_w, content_h = bounds.width, bounds.height
+
+        # Calculate fill ratio (area-based)
+        frame_area = frame_w * frame_h
+        content_area = content_w * content_h
+        fill_ratio = content_area / max(frame_area, 1)
+
+        # Also check dimensional fill (max of width/height fractions)
+        dim_fill = max(content_w / max(frame_w, 1), content_h / max(frame_h, 1))
+
+        if 0.40 <= dim_fill <= 0.90:
+            # Within acceptable range — just re-centre
+            return self._center_content(frame, bounds, target_size)
+
+        # Target dimensional fill of ~67%
+        target_fill = 0.67
+        scale_factor = target_fill / max(dim_fill, 0.01)
+
+        # Extract the content region
+        content = frame.subsurface(bounds).copy()
+        new_w = max(1, int(content_w * scale_factor))
+        new_h = max(1, int(content_h * scale_factor))
+
+        # Clamp to target size
+        new_w = min(new_w, frame_w)
+        new_h = min(new_h, frame_h)
+
+        scaled_content = pygame.transform.smoothscale(content, (new_w, new_h))
+
+        # Centre within a new frame
+        result = pygame.Surface(target_size, pygame.SRCALPHA)
+        paste_x = (frame_w - new_w) // 2
+        paste_y = (frame_h - new_h) // 2
+        result.blit(scaled_content, (paste_x, paste_y))
+        return result
+
+    @staticmethod
+    def _center_content(frame: pygame.Surface, bounds: pygame.Rect,
+                        target_size: Tuple[int, int]) -> pygame.Surface:
+        """Re-centre content within the frame without resizing."""
+        frame_w, frame_h = target_size
+        content = frame.subsurface(bounds).copy()
+
+        # Check if already roughly centred (within 3px)
+        expected_x = (frame_w - bounds.width) // 2
+        expected_y = (frame_h - bounds.height) // 2
+        if abs(bounds.x - expected_x) <= 3 and abs(bounds.y - expected_y) <= 3:
+            return frame
+
+        result = pygame.Surface(target_size, pygame.SRCALPHA)
+        paste_x = (frame_w - bounds.width) // 2
+        paste_y = (frame_h - bounds.height) // 2
+        result.blit(content, (paste_x, paste_y))
+        return result
 
     def _scale_frames(self, frames: List[pygame.Surface],
                       target_size: Tuple[int, int]) -> List[pygame.Surface]:
@@ -331,6 +444,11 @@ class SpriteSheetLoader:
         target_size = self.CHARACTER_SIZES.get(character_id, self.GAMEPLAY_SIZE)
         frames = self._scale_frames(frames, target_size)
 
+        # Normalize custom/generated character frames for consistent sizing
+        is_custom = character_id not in ('biggie', 'prissy', 'dash', 'snowy', 'rex', 'jazzy')
+        if is_custom:
+            frames = [self._normalize_custom_frame(f, target_size) for f in frames]
+
         # Flip if facing left (sprites are drawn facing right)
         # Note: face_camera typically shouldn't be flipped as it faces forward,
         # but if the original art is slightly angled, we might want to. 
@@ -378,6 +496,11 @@ class SpriteSheetLoader:
         target_size = self.CHARACTER_SIZES.get(character_id, self.GAMEPLAY_SIZE)
         frames = self._scale_frames(frames, target_size)
 
+        # Normalize custom character frames for consistent sizing
+        is_custom = character_id not in ('biggie', 'prissy', 'dash', 'snowy', 'rex', 'jazzy')
+        if is_custom:
+            frames = [self._normalize_custom_frame(f, target_size) for f in frames]
+
         if not facing_right:
             frames = self._flip_frames(frames)
 
@@ -416,6 +539,26 @@ class SpriteSheetLoader:
         if opposite_key not in self._animation_cache:
             self._animation_cache[opposite_key] = [pygame.transform.flip(sprite, True, False)]
 
+        return sprite
+
+    def get_front_flight_sprite(self, character_id: str) -> Optional[pygame.Surface]:
+        """Get single front-facing flight sprite image. Returns None if unavailable."""
+        cache_key = (character_id, 'front_flight', True)
+        if cache_key in self._animation_cache:
+            frames = self._animation_cache[cache_key]
+            return frames[0] if frames else None
+
+        filepath = self._get_front_flight_sprite_path(character_id)
+        if not filepath:
+            return None
+
+        sprite = self._load_sprite_sheet(filepath)
+        if sprite is None:
+            return None
+
+        target_size = self.CHARACTER_SIZES.get(character_id, self.GAMEPLAY_SIZE)
+        sprite = pygame.transform.smoothscale(sprite, target_size)
+        self._animation_cache[cache_key] = [sprite]
         return sprite
 
     def get_portrait(self, character_id: str) -> Optional[pygame.Surface]:

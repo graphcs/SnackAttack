@@ -43,11 +43,13 @@ class WingsEffect:
     # -- public api ----------------------------------------------------------
 
     def update(self, dt: float, active: bool, player_center: Tuple[float, float],
-               facing_right: bool) -> None:
+               facing_right: bool, is_flying: bool = False) -> None:
         self.time += dt
 
         if active and self.cfg.get("trail_particles", True):
-            rate = self.cfg.get("trail_particle_rate", 3)
+            # More particles during active flight
+            base_rate = self.cfg.get("trail_particle_rate", 3)
+            rate = base_rate * 3 if is_flying else base_rate
             cx, cy = player_center
             for _ in range(rate):
                 self.trail_particles.append({
@@ -112,10 +114,19 @@ class WingsEffect:
 
     def render(self, surface: pygame.Surface, render_cx: int, render_cy: int,
                sprite_w: int, sprite_h: int, facing_right: bool,
-               arena_left: float, arena_top: float, offset: Tuple[int, int]) -> None:
+               arena_left: float, arena_top: float, offset: Tuple[int, int],
+               is_flying: bool = False) -> None:
         """Draw wings (sprite-based or procedural) + golden trail behind the player."""
-        flap_speed = self.cfg.get("flap_speed", 4.0)
-        flap_amp = self.cfg.get("flap_amplitude", 18)
+        base_flap_speed = self.cfg.get("flap_speed", 4.0)
+        base_flap_amp = self.cfg.get("flap_amplitude", 18)
+
+        # Enhanced flap during active flight
+        if is_flying:
+            flap_speed = base_flap_speed * 1.6
+            flap_amp = base_flap_amp * 1.4
+        else:
+            flap_speed = base_flap_speed
+            flap_amp = base_flap_amp
 
         # Flap offset via sine wave to select frame
         flap = math.sin(self.time * flap_speed * math.pi) * flap_amp
@@ -132,6 +143,24 @@ class WingsEffect:
 
         # Draw golden trail particles (same for both modes)
         self._render_trail_particles(surface, arena_left, arena_top, offset)
+
+        # Stronger golden glow aura during active flight
+        if is_flying:
+            self._render_flight_glow(surface, render_cx, render_cy, sprite_w, sprite_h)
+
+    def _render_flight_glow(self, surface: pygame.Surface,
+                            cx: int, cy: int, sw: int, sh: int) -> None:
+        """Draw a bright golden glow behind the dog while flying."""
+        pulse = math.sin(self.time * 4.0) * 0.15 + 0.85
+        radius = int(max(sw, sh) * 0.7 * pulse)
+        glow_size = radius * 2 + 4
+        glow_surf = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
+        gc = glow_size // 2
+        # Outer soft gold glow
+        pygame.draw.circle(glow_surf, (255, 215, 80, 35), (gc, gc), radius)
+        # Inner brighter core
+        pygame.draw.circle(glow_surf, (255, 230, 120, 55), (gc, gc), int(radius * 0.55))
+        surface.blit(glow_surf, (cx - gc, cy - gc))
 
     def _render_sprite_wings(self, surface: pygame.Surface, render_cx: int, render_cy: int,
                              sprite_w: int, sprite_h: int, facing_right: bool,
@@ -771,7 +800,8 @@ class PowerUpVFXManager:
     def update(self, dt: float, active_effects: List[Dict[str, Any]],
                player_x: float, player_y: float,
                player_w: int, player_h: int,
-               facing_right: bool) -> None:
+               facing_right: bool,
+               is_flying: bool = False) -> None:
         """Update all sub-effects based on current active effects."""
         has_boost = any(e["type"] == "boost" for e in active_effects)
         has_speed = any(e["type"] in ("speed_boost", "boost") for e in active_effects)
@@ -780,7 +810,8 @@ class PowerUpVFXManager:
         cx = player_x + player_w / 2
         cy = player_y + player_h / 2
 
-        self.wings.update(dt, has_boost, (cx, cy), facing_right)
+        self.wings.update(dt, has_boost, (cx, cy), facing_right,
+                          is_flying=is_flying)
         self.streaks.update(dt, has_speed, speed_type,
                             player_x, player_y, player_w, player_h, facing_right)
         self.aura.update(dt)
@@ -808,7 +839,8 @@ class PowerUpVFXManager:
                       arena_left: float, arena_top: float,
                       offset: Tuple[int, int],
                       facing_right: bool = True,
-                      render_wings: bool = True) -> None:
+                      render_wings: bool = True,
+                      is_flying: bool = False) -> None:
         """Effects drawn *behind* the player sprite (call before blit)."""
         render_cx = render_x + sprite_w // 2
         render_cy = render_y + sprite_h // 2
@@ -824,7 +856,8 @@ class PowerUpVFXManager:
         if has_boost and render_wings and self._cfg.get("wings", {}).get("enabled", True):
             self.wings.render(surface, render_cx, render_cy,
                               sprite_w, sprite_h, facing_right,
-                              arena_left, arena_top, offset)
+                              arena_left, arena_top, offset,
+                              is_flying=is_flying)
 
         # Speed streaks / afterimages (behind sprite)
         has_speed = any(e["type"] in ("speed_boost", "boost") for e in active_effects)

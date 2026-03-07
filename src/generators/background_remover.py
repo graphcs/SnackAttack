@@ -60,7 +60,7 @@ def remove_background_api(image_bytes: bytes) -> bytes:
         raise ConnectionError(f"Failed to connect to rembg API: {e}") from e
 
 
-def ensure_transparency(image_bytes: bytes) -> bytes:
+def ensure_transparency(image_bytes: bytes, force_api: bool = False) -> bytes:
     """
     Ensure an image has a transparent background using the rembg API.
 
@@ -69,11 +69,16 @@ def ensure_transparency(image_bytes: bytes) -> bytes:
 
     Args:
         image_bytes: Raw PNG image bytes
+        force_api: If True, always send the image through rembg even if the
+                   corner pixels already look transparent.
 
     Returns:
         Processed PNG image bytes with transparent background
     """
     from PIL import Image
+
+    if force_api:
+        return remove_background_api(image_bytes)
 
     # Quick check: if corners are already transparent, skip API call
     img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")

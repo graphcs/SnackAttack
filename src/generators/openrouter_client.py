@@ -26,7 +26,7 @@ class OpenRouterClient:
     API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
     # Google Nano Banana Pro — best image generation with identity preservation
-    IMAGE_MODEL = "google/gemini-3-pro-image-preview"
+    IMAGE_MODEL = "google/gemini-3.1-flash-image-preview"
     # Google Nano Banana — faster/cheaper alternative
     IMAGE_MODEL_FAST = "google/gemini-2.5-flash-image"
     # Legacy OpenAI models
