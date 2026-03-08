@@ -618,6 +618,17 @@ class SpriteSheetLoader:
 
         filepath = os.path.join(self._food_path, f"{name}.png")
 
+        # Allow admin custom treat image to override red_bull only
+        if snack_id == 'red_bull':
+            try:
+                from ..core.config_manager import ConfigManager
+                cfg = ConfigManager().get_admin_settings().get("game_settings", {})
+                custom_img = cfg.get("custom_power_treat_image", "")
+                if custom_img and os.path.isfile(custom_img):
+                    filepath = custom_img
+            except ImportError:
+                pass
+
         try:
             if os.path.exists(filepath):
                 sprite = pygame.image.load(filepath).convert_alpha()

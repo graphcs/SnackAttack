@@ -5,3 +5,4 @@ from .character_select import CharacterSelectScreen
 from .gameplay import GameplayScreen
 from .settings import SettingsScreen
 from .game_over import GameOverScreen
+from .admin_settings import AdminSettingsScreen

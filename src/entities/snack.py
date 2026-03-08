@@ -19,6 +19,17 @@ class Snack:
         """
         self.snack_id = snack_config.get("id", "unknown")
         self.name = snack_config.get("name", "Unknown")
+        # Admin override for power treat name
+        if self.snack_id == 'red_bull':
+            try:
+                from ..core.config_manager import ConfigManager
+                cfg = ConfigManager().get_admin_settings().get("game_settings", {})
+                custom_name = cfg.get("custom_power_treat_name", "")
+                if custom_name.strip():
+                    self.name = custom_name.strip()
+            except ImportError:
+                pass
+        
         self.point_value = snack_config.get("point_value", 0)
         self.effect = snack_config.get("effect")
         self.despawn_time = snack_config.get("despawn_seconds", 8.0)
