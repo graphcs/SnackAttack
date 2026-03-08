@@ -1133,6 +1133,19 @@ class GameplayScreen(BaseScreen):
 
         # Load snack configs
         self.snack_configs = self.config.get_all_snacks()
+        
+        # Override red_bull name if configured in admin settings
+        try:
+            from ..core.config_manager import ConfigManager
+            cfg = ConfigManager().get_admin_settings().get("game_settings", {})
+            custom_name = cfg.get("custom_power_treat_name", "").strip()
+            if custom_name:
+                for s in self.snack_configs:
+                    if s.get("id") == "red_bull":
+                        s["name"] = custom_name
+                        break
+        except Exception:
+            pass
 
         # Reset game state
         self.current_level = 1
@@ -1744,7 +1757,7 @@ class GameplayScreen(BaseScreen):
                     choices = possible_snacks
 
                 self.crowd_chaos_mode = VotingMode.TREAT
-                self.crowd_chaos_options = [s.get("id", "snack") for s in choices]
+                self.crowd_chaos_options = [s.get("name", "snack").replace(" ", "_") for s in choices]
                 self.crowd_chaos_correct_answer = None
 
                 if self.chat_simulator:

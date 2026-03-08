@@ -21,6 +21,7 @@ class FallingTreat:
         """
         self.treat_id = treat_config.get("id", "normal")
         self.name = treat_config.get("name", "Treat")
+        
         self.point_value = treat_config.get("point_value", 100)
         self.color = tuple(treat_config.get("color", [255, 210, 80]))
         self.spawn_bias_right = treat_config.get("spawn_bias_right", False)

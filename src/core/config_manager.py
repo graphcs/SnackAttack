@@ -34,7 +34,8 @@ class ConfigManager:
             "controls",
             "treat_attack_settings",
             "twitch_config",
-            "powerup_visuals"
+            "powerup_visuals",
+            "admin_settings"
         ]
 
         for config_name in config_files:
@@ -130,6 +131,25 @@ class ConfigManager:
         if "audio_settings" in self._configs:
             self._configs["audio_settings"][key] = value
             self.save_audio_settings()
+
+    def save_admin_settings(self) -> None:
+        """Save admin settings back to file."""
+        file_path = os.path.join(self._config_dir, "admin_settings.json")
+        with open(file_path, 'w') as f:
+            json.dump(self._configs.get("admin_settings", {}), f, indent=2)
+
+    def update_admin_setting(self, section: str, key: str, value: Any) -> None:
+        """Update a single admin setting value and persist to disk."""
+        if "admin_settings" not in self._configs:
+            self._configs["admin_settings"] = {}
+        if section not in self._configs["admin_settings"]:
+            self._configs["admin_settings"][section] = {}
+        self._configs["admin_settings"][section][key] = value
+        self.save_admin_settings()
+
+    def get_admin_settings(self) -> Dict:
+        """Get the full admin settings config."""
+        return self.get_config("admin_settings")
 
     def get_twitch_config(self) -> Dict:
         """Get Twitch integration configuration."""

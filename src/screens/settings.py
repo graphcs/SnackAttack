@@ -50,9 +50,6 @@ class SettingsScreen(BaseScreen):
         self.back_selected = False
         self.select_indicator: Optional[pygame.Surface] = None
 
-        # Daydream font for footer (same size as main menu)
-        self.daydream_font_small: Optional[pygame.font.Font] = None
-
     def on_enter(self, data: Dict[str, Any] = None) -> None:
         """Initialize settings screen."""
         self.initialize_fonts()
@@ -166,14 +163,22 @@ class SettingsScreen(BaseScreen):
                 "slider",
                 start_y + spacing * 4,
                 audio_config.get("master_volume", 0.8)
+            ),
+            SettingItem(
+                "Admin",
+                "admin",
+                "navigate",
+                start_y + spacing * 5,
+                None
             )
         ]
 
     def on_exit(self) -> None:
         """Save settings when leaving."""
-        # Update config with current values
+        # Update config with current values (skip navigate-type items)
         for item in self.settings_items:
-            self.config.update_audio_setting(item.setting_key, item.value)
+            if item.item_type != "navigate":
+                self.config.update_audio_setting(item.setting_key, item.value)
 
     def handle_event(self, event: pygame.event.Event) -> None:
         """Handle input events."""
@@ -190,7 +195,11 @@ class SettingsScreen(BaseScreen):
                 if self.back_selected:
                     self.state_machine.change_state(GameState.MAIN_MENU)
                 else:
-                    self._toggle_value()
+                    item = self.settings_items[self.selected_index]
+                    if item.item_type == "navigate" and item.setting_key == "admin":
+                        self.state_machine.change_state(GameState.ADMIN_SETTINGS)
+                    else:
+                        self._toggle_value()
             elif event.key == pygame.K_ESCAPE:
                 self.state_machine.change_state(GameState.MAIN_MENU)
 
@@ -274,7 +283,9 @@ class SettingsScreen(BaseScreen):
             return
 
         item = self.settings_items[self.selected_index]
-        if item.item_type == "toggle":
+        if item.item_type == "navigate" and item.setting_key == "admin":
+            self.state_machine.change_state(GameState.ADMIN_SETTINGS)
+        elif item.item_type == "toggle":
             item.value = not item.value
 
     def update(self, dt: float) -> None:
@@ -373,3 +384,15 @@ class SettingsScreen(BaseScreen):
             # Border
             pygame.draw.rect(surface, color,
                              (slider_x, slider_y, slider_width, slider_height), 2, border_radius=4)
+
+        elif item.item_type == "navigate":
+            # Show a right-arrow triangle so the user knows it's clickable
+            # We don't use '→' glyph as it may be blank in pixel fonts
+            arrow_col = self.selected_color if item.selected else self.text_color
+            if self.menu_font:
+                cy = item.y_position + self.menu_font.get_height() // 2
+                cx = value_x + 6
+                size = 10
+                pts = [(cx - size, cy - size), (cx + size, cy), (cx - size, cy + size)]
+                pygame.draw.polygon(surface, arrow_col, pts)
+

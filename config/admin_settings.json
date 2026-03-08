@@ -1,0 +1,10 @@
+{
+  "game_settings": {
+    "round_duration_seconds": 90,
+    "treat_attack_round_duration_seconds": 60,
+    "powerup_duration_seconds": 5.0,
+    "powerup_speed_boost_multiplier": 1.5,
+    "custom_power_treat_image": "",
+    "custom_power_treat_name": ""
+  }
+}

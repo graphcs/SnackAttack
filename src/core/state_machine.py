@@ -15,6 +15,7 @@ class GameState(Enum):
     TREAT_ATTACK = auto()  # New Treat Attack mode
     PAUSED = auto()
     SETTINGS = auto()
+    ADMIN_SETTINGS = auto()  # Admin/master settings (sponsors, game params)
     GAME_OVER = auto()
     UPLOAD_AVATAR = auto()  # Custom dog avatar upload
     AVATAR_SHOWCASE = auto()  # Hero showcase for a dog character

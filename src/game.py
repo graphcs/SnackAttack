@@ -13,6 +13,7 @@ from .screens.character_select import CharacterSelectScreen
 from .screens.gameplay import GameplayScreen
 from .screens.treat_attack_gameplay import TreatAttackGameplay
 from .screens.settings import SettingsScreen
+from .screens.admin_settings import AdminSettingsScreen
 from .screens.game_over import GameOverScreen
 from .screens.upload_avatar import UploadAvatarScreen
 from .screens.avatar_showcase import AvatarShowcaseScreen
@@ -115,13 +116,14 @@ class Game:
     def _create_screens(self) -> None:
         """Create and register all game screens."""
         # Create screen instances
-        main_menu = MainMenuScreen(self.state_machine, self.config, self.event_bus)
+        main_menu       = MainMenuScreen(self.state_machine, self.config, self.event_bus)
         character_select = CharacterSelectScreen(self.state_machine, self.config, self.event_bus)
-        gameplay = GameplayScreen(self.state_machine, self.config, self.event_bus)
-        treat_attack = TreatAttackGameplay(self.state_machine, self.config, self.event_bus)
-        settings = SettingsScreen(self.state_machine, self.config, self.event_bus)
-        game_over = GameOverScreen(self.state_machine, self.config, self.event_bus)
-        upload_avatar = UploadAvatarScreen(self.state_machine, self.config, self.event_bus)
+        gameplay        = GameplayScreen(self.state_machine, self.config, self.event_bus)
+        treat_attack    = TreatAttackGameplay(self.state_machine, self.config, self.event_bus)
+        settings        = SettingsScreen(self.state_machine, self.config, self.event_bus)
+        admin_settings  = AdminSettingsScreen(self.state_machine, self.config, self.event_bus)
+        game_over       = GameOverScreen(self.state_machine, self.config, self.event_bus)
+        upload_avatar   = UploadAvatarScreen(self.state_machine, self.config, self.event_bus)
         avatar_showcase = AvatarShowcaseScreen(self.state_machine, self.config, self.event_bus)
 
         # Register screens with state machine
@@ -130,6 +132,7 @@ class Game:
         self.state_machine.register_state(GameState.GAMEPLAY, gameplay)
         self.state_machine.register_state(GameState.TREAT_ATTACK, treat_attack)
         self.state_machine.register_state(GameState.SETTINGS, settings)
+        self.state_machine.register_state(GameState.ADMIN_SETTINGS, admin_settings)
         self.state_machine.register_state(GameState.GAME_OVER, game_over)
         self.state_machine.register_state(GameState.UPLOAD_AVATAR, upload_avatar)
         self.state_machine.register_state(GameState.AVATAR_SHOWCASE, avatar_showcase)
