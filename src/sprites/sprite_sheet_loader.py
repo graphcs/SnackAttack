@@ -35,9 +35,6 @@ class SpriteSheetLoader:
         'prissy': (173, 173),  # 0.8x of 216
     }
 
-    # Custom/generated characters use this size (slightly smaller to match built-ins)
-    CUSTOM_CHARACTER_SIZE = (163, 163)
-
     # Animation timing (in seconds)
     RUN_FRAME_DURATION = 0.1      # 10 FPS for run cycle
     EAT_FRAME_DURATION = 0.12     # Slightly slower for eat
@@ -111,18 +108,12 @@ class SpriteSheetLoader:
                     if char_data.get('custom', False) and char_id and char_id not in self.CHARACTER_NAMES:
                         display_name = char_data.get('display_name', char_id.capitalize())
                         self.CHARACTER_NAMES[char_id] = display_name
-                        # Custom characters get a smaller size to match built-ins
-                        if char_id not in self.CHARACTER_SIZES:
-                            self.CHARACTER_SIZES[char_id] = self.CUSTOM_CHARACTER_SIZE
         except Exception as e:
             print(f"[SpriteSheetLoader] Warning: Could not load custom characters: {e}")
 
     def register_custom_character(self, character_id: str, display_name: str):
         """Register a custom character for sprite loading at runtime."""
         self.CHARACTER_NAMES[character_id] = display_name
-        # Custom characters get a smaller size to match built-ins
-        if character_id not in self.CHARACTER_SIZES:
-            self.CHARACTER_SIZES[character_id] = self.CUSTOM_CHARACTER_SIZE
         # Clear any cached entries for this character so they reload
         keys_to_remove = [k for k in self._animation_cache if k[0] == character_id]
         for k in keys_to_remove:
@@ -397,6 +388,54 @@ class SpriteSheetLoader:
         """Scale frames to target size."""
         return [pygame.transform.smoothscale(f, target_size) for f in frames]
 
+    def _normalize_frame_sequence(self, frames: List[pygame.Surface],
+                                  target_size: Tuple[int, int],
+                                  target_fill: float = 0.74,
+                                  bottom_padding: int = 10) -> List[pygame.Surface]:
+        """Normalize a sequence of frames against one shared reference size.
+
+        This is primarily used for generated custom walking sheets where the dog
+        may drift in apparent size from frame to frame. The largest frame defines
+        the shared reference, and all other frames are scaled toward that same
+        visual footprint and placed on a common baseline.
+        """
+        bounds_list = [self._get_content_bounds(frame) for frame in frames]
+        valid_bounds = [bounds for bounds in bounds_list if bounds is not None]
+        if not valid_bounds:
+            return frames
+
+        frame_w, frame_h = target_size
+        max_content_w = max(bounds.width for bounds in valid_bounds)
+        max_content_h = max(bounds.height for bounds in valid_bounds)
+
+        max_dim_fill = max(max_content_w / max(frame_w, 1), max_content_h / max(frame_h, 1))
+        shared_scale = target_fill / max(max_dim_fill, 0.01)
+        ref_w = max(1, min(frame_w, int(round(max_content_w * shared_scale))))
+        ref_h = max(1, min(frame_h, int(round(max_content_h * shared_scale))))
+
+        normalized_frames: List[pygame.Surface] = []
+        for frame, bounds in zip(frames, bounds_list):
+            if bounds is None:
+                normalized_frames.append(frame)
+                continue
+
+            content = frame.subsurface(bounds).copy()
+            scale_x = ref_w / max(bounds.width, 1)
+            scale_y = ref_h / max(bounds.height, 1)
+            scale = min(scale_x, scale_y)
+
+            new_w = max(1, min(frame_w, int(round(bounds.width * scale))))
+            new_h = max(1, min(frame_h, int(round(bounds.height * scale))))
+            scaled = pygame.transform.smoothscale(content, (new_w, new_h))
+
+            result = pygame.Surface(target_size, pygame.SRCALPHA)
+            paste_x = (frame_w - new_w) // 2
+            paste_y = max(0, frame_h - new_h - bottom_padding)
+            result.blit(scaled, (paste_x, paste_y))
+            normalized_frames.append(result)
+
+        return normalized_frames
+
     def _flip_frames(self, frames: List[pygame.Surface]) -> List[pygame.Surface]:
         """Horizontally flip frames for left-facing direction."""
         return [pygame.transform.flip(f, True, False) for f in frames]
@@ -531,6 +570,10 @@ class SpriteSheetLoader:
         target_size = self.CHARACTER_SIZES.get(character_id, self.GAMEPLAY_SIZE)
         sprite = pygame.transform.smoothscale(sprite, target_size)
 
+        is_custom = character_id not in ('biggie', 'prissy', 'dash', 'snowy', 'rex', 'jazzy')
+        if is_custom:
+            sprite = self._normalize_custom_frame(sprite, target_size)
+
         if not facing_right:
             sprite = pygame.transform.flip(sprite, True, False)
 
@@ -558,6 +601,11 @@ class SpriteSheetLoader:
 
         target_size = self.CHARACTER_SIZES.get(character_id, self.GAMEPLAY_SIZE)
         sprite = pygame.transform.smoothscale(sprite, target_size)
+
+        is_custom = character_id not in ('biggie', 'prissy', 'dash', 'snowy', 'rex', 'jazzy')
+        if is_custom:
+            sprite = self._normalize_custom_frame(sprite, target_size)
+
         self._animation_cache[cache_key] = [sprite]
         return sprite
 
@@ -765,6 +813,13 @@ class SpriteSheetLoader:
         # Only scale if target_size is specified
         if target_size:
             frames = self._scale_frames(frames, target_size)
+            if is_custom:
+                frames = self._normalize_frame_sequence(
+                    frames,
+                    target_size,
+                    target_fill=0.76,
+                    bottom_padding=12,
+                )
 
         # Flip if facing left
         if not facing_right:

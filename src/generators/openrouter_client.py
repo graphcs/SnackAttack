@@ -25,16 +25,10 @@ class OpenRouterClient:
 
     API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-    # Google Nano Banana Pro — best image generation with identity preservation
-    IMAGE_MODEL = "google/gemini-3.1-flash-image-preview"
-    # Google Nano Banana — faster/cheaper alternative
-    IMAGE_MODEL_FAST = "google/gemini-2.5-flash-image"
-    # Legacy OpenAI models
-    IMAGE_MODEL_GPT = "openai/gpt-5-image"
-    IMAGE_MODEL_GPT_MINI = "openai/gpt-5-image-mini"
-
-    # Model for vision-only analysis
-    VISION_MODEL = "openai/gpt-4o"
+    # Single model for all operations (vision analysis + image generation)
+    MODEL = "google/gemini-3-pro-image-preview"
+    IMAGE_MODEL = MODEL
+    VISION_MODEL = MODEL
 
     # Supported aspect ratios for Gemini image generation
     SUPPORTED_ASPECT_RATIOS = {
@@ -320,7 +314,7 @@ class OpenRouterClient:
         """Test if the API key is valid."""
         try:
             payload = {
-                "model": "openai/gpt-4o-mini",
+                "model": self.MODEL,
                 "messages": [{"role": "user", "content": "Say 'ok'"}],
                 "max_tokens": 5,
             }
