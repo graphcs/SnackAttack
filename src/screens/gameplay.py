@@ -971,8 +971,10 @@ class GameplayScreen(BaseScreen):
         self.current_trivia_question = ""
 
         self.final_round_trivia_active = False
+        self.final_round_trivia_triggered = False
         self.final_round_trivia_result_timer = 0.0
         self.final_round_trivia_result_duration = 2.0
+        self.final_round_trivia_trigger_time = 15.0
         self.final_round_trivia_last_winner: Optional[str] = None
         self.final_round_trivia_correct = False
 
@@ -1160,6 +1162,7 @@ class GameplayScreen(BaseScreen):
         self.p2_round_wins = 0
         self.paused = False
         self.final_round_trivia_active = False
+        self.final_round_trivia_triggered = False
         self.final_round_trivia_result_timer = 0.0
         self.final_round_trivia_last_winner = None
         self.final_round_trivia_correct = False
@@ -1734,6 +1737,7 @@ class GameplayScreen(BaseScreen):
         self.round_active = True
         self.skip_walk_in_after_intro = False
         self.final_round_trivia_active = False
+        self.final_round_trivia_triggered = False
         self.final_round_trivia_result_timer = 0.0
         self.final_round_trivia_last_winner = None
         self.final_round_trivia_correct = False
@@ -1817,12 +1821,13 @@ class GameplayScreen(BaseScreen):
         return random.choice(trivias)
 
     def _start_final_round_trivia(self) -> None:
-        """Pause gameplay at the end of round three and present the final trivia vote."""
+        """Pause gameplay near the end of round three and present the final trivia vote."""
         if self.final_round_trivia_active or not self.voting_system:
             return
 
         self.round_active = False
         self.final_round_trivia_active = True
+        self.final_round_trivia_triggered = True
         self.final_round_trivia_result_timer = 0.0
         self.final_round_trivia_last_winner = None
         self.final_round_trivia_correct = False
@@ -1842,7 +1847,7 @@ class GameplayScreen(BaseScreen):
         self.announcement_timer = 1.5
 
     def _resolve_final_round_trivia(self, vote_winner: str) -> None:
-        """Store the final trivia result, show feedback, then continue to round-end flow."""
+        """Store the final trivia result, show feedback, then resume the round."""
         if not self.voting_system:
             return
 
@@ -1866,7 +1871,7 @@ class GameplayScreen(BaseScreen):
         self.announcement_timer = self.final_round_trivia_result_duration
 
     def _update_final_round_trivia(self, dt: float) -> None:
-        """Update the dedicated end-of-round trivia sequence."""
+        """Update the dedicated final-round trivia interruption."""
         if self.final_round_trivia_active and self.voting_system:
             vote_winner = self.voting_system.update(dt)
             if vote_winner:
@@ -1879,7 +1884,7 @@ class GameplayScreen(BaseScreen):
             self.final_round_trivia_result_timer -= dt
             if self.final_round_trivia_result_timer <= 0:
                 self.final_round_trivia_result_timer = 0.0
-                self._end_round()
+                self.round_active = True
 
     def _start_crowd_chaos_countdown(self) -> None:
         """Start the on-screen Crowd Chaos countdown."""
@@ -2231,12 +2236,17 @@ class GameplayScreen(BaseScreen):
         if not self.round_active:
             return
 
+        # Trigger the final-round trivia once when 15 seconds remain, then resume the round after it.
+        if (self.current_round == self.max_rounds
+                and self.crowd_chaos_mode == VotingMode.TRIVIA
+                and not self.final_round_trivia_triggered
+                and self.round_timer <= self.final_round_trivia_trigger_time):
+            self._start_final_round_trivia()
+            return
+
         # Update round timer
         self.round_timer -= dt
         if self.round_timer <= 0:
-            if self.current_round == self.max_rounds and self.crowd_chaos_mode == VotingMode.TRIVIA:
-                self._start_final_round_trivia()
-                return
             self._end_round()
             return
 
