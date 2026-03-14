@@ -970,6 +970,14 @@ class GameplayScreen(BaseScreen):
         self.crowd_chaos_correct_answer: Optional[str] = None
         self.current_trivia_question = ""
 
+        self.final_round_trivia_active = False
+        self.final_round_trivia_triggered = False
+        self.final_round_trivia_result_timer = 0.0
+        self.final_round_trivia_result_duration = 2.0
+        self.final_round_trivia_trigger_time = 15.0
+        self.final_round_trivia_last_winner: Optional[str] = None
+        self.final_round_trivia_correct = False
+
         # Crowd Chaos screen tint
         self.crowd_chaos_tint_alpha = 0.0
         self.crowd_chaos_tint_max_alpha = 75
@@ -1153,6 +1161,11 @@ class GameplayScreen(BaseScreen):
         self.p1_round_wins = 0
         self.p2_round_wins = 0
         self.paused = False
+        self.final_round_trivia_active = False
+        self.final_round_trivia_triggered = False
+        self.final_round_trivia_result_timer = 0.0
+        self.final_round_trivia_last_winner = None
+        self.final_round_trivia_correct = False
 
         # Create arenas and players
         self._setup_arenas(p1_char, p2_char)
@@ -1723,11 +1736,17 @@ class GameplayScreen(BaseScreen):
         self.round_timer = self.round_duration
         self.round_active = True
         self.skip_walk_in_after_intro = False
+        self.final_round_trivia_active = False
+        self.final_round_trivia_triggered = False
+        self.final_round_trivia_result_timer = 0.0
+        self.final_round_trivia_last_winner = None
+        self.final_round_trivia_correct = False
         self.crowd_chaos_triggered = False
         self.crowd_chaos_active = False
         self.crowd_chaos_countdown_active = False
         self.crowd_chaos_countdown_timer = 0.0
         self.crowd_chaos_countdown_value = 0
+        self.crowd_chaos_tint_alpha = 0.0
         self.player1.reset()
         self.arena1.snacks.clear()
         # Reset thunder sound flag for new round
@@ -1774,13 +1793,7 @@ class GameplayScreen(BaseScreen):
 
             else:
                 # Round 3: Trivia
-                trivias = [
-                    {"q": "Who loves lasagna?", "a": "Jazzy", "opts": ["Jazzy", "Biggie", "Prissy", "Snowy"]},
-                    {"q": "What falls from sky?", "a": "Snacks", "opts": ["Snacks", "Rain", "Cats", "Rocks"]},
-                    {"q": "Best pizza topping?", "a": "Cheese", "opts": ["Cheese", "Pineapple", "Anchovy", "Olives"]},
-                    {"q": "Game Name?", "a": "SnackAttack", "opts": ["SnackAttack", "DogRun", "EatFast", "Fetch Master"]}
-                ]
-                trivia = random.choice(trivias)
+                trivia = self._select_round_three_trivia()
                 self.current_trivia_question = trivia["q"]
                 self.crowd_chaos_mode = VotingMode.TRIVIA
                 self.crowd_chaos_options = trivia["opts"]
@@ -1796,6 +1809,82 @@ class GameplayScreen(BaseScreen):
                 activate=False,
                 single_vote_mode=True,
             )
+
+    def _select_round_three_trivia(self) -> Dict[str, Any]:
+        """Return one trivia prompt for the final round."""
+        trivias = [
+            {"q": "Who loves lasagna?", "a": "Jazzy", "opts": ["Jazzy", "Biggie", "Prissy", "Snowy"]},
+            {"q": "What falls from sky?", "a": "Snacks", "opts": ["Snacks", "Rain", "Cats", "Rocks"]},
+            {"q": "Best pizza topping?", "a": "Cheese", "opts": ["Cheese", "Pineapple", "Anchovy", "Olives"]},
+            {"q": "Game Name?", "a": "SnackAttack", "opts": ["SnackAttack", "DogRun", "EatFast", "Fetch Master"]},
+        ]
+        return random.choice(trivias)
+
+    def _start_final_round_trivia(self) -> None:
+        """Pause gameplay near the end of round three and present the final trivia vote."""
+        if self.final_round_trivia_active or not self.voting_system:
+            return
+
+        self.round_active = False
+        self.final_round_trivia_active = True
+        self.final_round_trivia_triggered = True
+        self.final_round_trivia_result_timer = 0.0
+        self.final_round_trivia_last_winner = None
+        self.final_round_trivia_correct = False
+        self.crowd_chaos_active = False
+        self.crowd_chaos_triggered = False
+        self.crowd_chaos_countdown_active = False
+        self.crowd_chaos_tint_alpha = 0.0
+
+        self.voting_system.start_voting_window()
+
+        if self.chat_simulator:
+            self.chat_simulator.add_message("System", "FINAL ROUND TRIVIA!", (255, 200, 255))
+            self.chat_simulator.add_message("System", self.current_trivia_question, (255, 235, 180))
+
+        self.announcement_text = "FINAL ROUND TRIVIA"
+        self.announcement_color = (255, 220, 140)
+        self.announcement_timer = 1.5
+
+    def _resolve_final_round_trivia(self, vote_winner: str) -> None:
+        """Store the final trivia result, show feedback, then resume the round."""
+        if not self.voting_system:
+            return
+
+        self.final_round_trivia_active = False
+        self.final_round_trivia_last_winner = vote_winner
+        self.final_round_trivia_correct = vote_winner == self.voting_system.correct_trivia_answer
+        self.final_round_trivia_result_timer = self.final_round_trivia_result_duration
+
+        if self.final_round_trivia_correct:
+            self.announcement_text = "CORRECT ANSWER!"
+            self.announcement_color = (100, 255, 100)
+            if self.chat_simulator:
+                self.chat_simulator.add_message("System", "CORRECT ANSWER!", (100, 255, 100))
+        else:
+            correct = self.voting_system.correct_trivia_answer or "?"
+            self.announcement_text = f"WRONG! ANSWER: {correct.upper()}"
+            self.announcement_color = (255, 120, 120)
+            if self.chat_simulator:
+                self.chat_simulator.add_message("System", f"Answer: {correct}", (255, 120, 120))
+
+        self.announcement_timer = self.final_round_trivia_result_duration
+
+    def _update_final_round_trivia(self, dt: float) -> None:
+        """Update the dedicated final-round trivia interruption."""
+        if self.final_round_trivia_active and self.voting_system:
+            vote_winner = self.voting_system.update(dt)
+            if vote_winner:
+                self._resolve_final_round_trivia(vote_winner)
+
+            if self.chat_simulator:
+                self.chat_simulator.update(dt, self.voting_system)
+
+        elif self.final_round_trivia_result_timer > 0:
+            self.final_round_trivia_result_timer -= dt
+            if self.final_round_trivia_result_timer <= 0:
+                self.final_round_trivia_result_timer = 0.0
+                self.round_active = True
 
     def _start_crowd_chaos_countdown(self) -> None:
         """Start the on-screen Crowd Chaos countdown."""
@@ -2077,6 +2166,10 @@ class GameplayScreen(BaseScreen):
                 self._start_countdown()
             return
 
+        if self.final_round_trivia_active or self.final_round_trivia_result_timer > 0:
+            self._update_final_round_trivia(dt)
+            return
+
         # --- Jazzy's Chili Sequence Logic ---
         gameplay_dt = dt
         if self.chili_sequence_active and self.chili_target_player:
@@ -2143,16 +2236,25 @@ class GameplayScreen(BaseScreen):
         if not self.round_active:
             return
 
+        # Trigger the final-round trivia once when 15 seconds remain, then resume the round after it.
+        if (self.current_round == self.max_rounds
+                and self.crowd_chaos_mode == VotingMode.TRIVIA
+                and not self.final_round_trivia_triggered
+                and self.round_timer <= self.final_round_trivia_trigger_time):
+            self._start_final_round_trivia()
+            return
+
         # Update round timer
         self.round_timer -= dt
         if self.round_timer <= 0:
             self._end_round()
             return
 
-        # Trigger one Crowd Chaos event at 40s elapsed in each round
+        # Trigger one Crowd Chaos event mid-round for rounds that are not reserved for final trivia
         elapsed_in_round = self.round_duration - self.round_timer
         if (not self.crowd_chaos_triggered
                 and not self.crowd_chaos_countdown_active
+                and self.crowd_chaos_mode != VotingMode.TRIVIA
                 and elapsed_in_round >= self.crowd_chaos_trigger_elapsed):
             self._start_crowd_chaos_countdown()
 
@@ -2538,6 +2640,7 @@ class GameplayScreen(BaseScreen):
         # Draw crowd chaos overlays
         self._render_crowd_chaos_tint(surface)
         self._render_crowd_chaos_overlay(surface)
+        self._render_final_round_trivia_overlay(surface)
 
         # Draw countdown
         if self.countdown > 0:
@@ -2621,6 +2724,100 @@ class GameplayScreen(BaseScreen):
                 options_surf = helper_font.render(options, True, (255, 230, 200))
                 options_rect = options_surf.get_rect(center=(center_x, 330))
                 surface.blit(options_surf, options_rect)
+
+    def _wrap_text_lines(self, font: pygame.font.Font, text: str, max_width: int) -> List[str]:
+        """Wrap text into multiple lines constrained by pixel width."""
+        words = text.split()
+        if not words:
+            return []
+
+        lines: List[str] = []
+        current_line = words[0]
+
+        for word in words[1:]:
+            test_line = f"{current_line} {word}"
+            if font.size(test_line)[0] <= max_width:
+                current_line = test_line
+            else:
+                lines.append(current_line)
+                current_line = word
+
+        lines.append(current_line)
+        return lines
+
+    def _render_final_round_trivia_overlay(self, surface: pygame.Surface) -> None:
+        """Render a prominent end-of-round trivia panel over the main gameplay area."""
+        if not (self.final_round_trivia_active or self.final_round_trivia_result_timer > 0):
+            return
+
+        overlay = pygame.Surface((self.game_area_width, self.screen_height), pygame.SRCALPHA)
+        overlay.fill((18, 10, 10, 185))
+        surface.blit(overlay, (0, 0))
+
+        panel_rect = pygame.Rect(110, 210, self.game_area_width - 220, 390)
+        pygame.draw.rect(surface, (50, 18, 18), panel_rect, border_radius=22)
+        pygame.draw.rect(surface, (255, 190, 120), panel_rect, 4, border_radius=22)
+
+        title_font = self.daydream_font_small if self.daydream_font_small else self.menu_font
+        question_font = self.daydream_font_small if self.daydream_font_small else self.menu_font
+        option_font = self.daydream_font_tiny if self.daydream_font_tiny else self.small_font
+        helper_font = self.daydream_font_smallest if self.daydream_font_smallest else self.small_font
+
+        title_text = "FINAL ROUND TRIVIA"
+        title_surf = title_font.render(title_text, True, (255, 232, 190))
+        title_rect = title_surf.get_rect(center=(panel_rect.centerx, panel_rect.y + 50))
+        surface.blit(title_surf, title_rect)
+
+        status_text = ""
+        if self.final_round_trivia_active and self.voting_system:
+            status_text = f"Vote now: {max(0, int(self.voting_system.voting_timer))}s"
+        elif self.final_round_trivia_last_winner:
+            status_text = self.announcement_text
+
+        if status_text:
+            status_color = (255, 220, 140) if self.final_round_trivia_active else self.announcement_color
+            status_surf = helper_font.render(status_text, True, status_color)
+            status_rect = status_surf.get_rect(center=(panel_rect.centerx, panel_rect.y + 92))
+            surface.blit(status_surf, status_rect)
+
+        question_lines = self._wrap_text_lines(question_font, self.current_trivia_question, panel_rect.width - 80)
+        question_y = panel_rect.y + 135
+        line_height = question_font.get_height() + 10
+        for line in question_lines:
+            line_surf = question_font.render(line, True, (255, 248, 225))
+            line_rect = line_surf.get_rect(center=(panel_rect.centerx, question_y))
+            surface.blit(line_surf, line_rect)
+            question_y += line_height
+
+        options = self.voting_system.options if self.voting_system else self.crowd_chaos_options
+        option_colors = [
+            (81, 180, 71),
+            (221, 68, 61),
+            (80, 160, 220),
+            (220, 180, 60),
+        ]
+        option_width = (panel_rect.width - 70) // 2
+        option_height = 54
+        option_start_y = panel_rect.bottom - 150
+
+        for idx, opt in enumerate(options[:4]):
+            row = idx // 2
+            col = idx % 2
+            box_x = panel_rect.x + 24 + col * (option_width + 22)
+            box_y = option_start_y + row * (option_height + 16)
+            option_rect = pygame.Rect(box_x, box_y, option_width, option_height)
+            color = option_colors[idx % len(option_colors)]
+            pygame.draw.rect(surface, (28, 18, 18), option_rect, border_radius=12)
+            pygame.draw.rect(surface, color, option_rect, 3, border_radius=12)
+
+            opt_text = option_font.render(f"!{opt}", True, color)
+            opt_rect = opt_text.get_rect(center=option_rect.center)
+            surface.blit(opt_text, opt_rect)
+
+        footer_text = "Answers are shown live on the vote meter and chat panel."
+        footer_surf = helper_font.render(footer_text, True, (220, 200, 180))
+        footer_rect = footer_surf.get_rect(center=(panel_rect.centerx, panel_rect.bottom - 28))
+        surface.blit(footer_surf, footer_rect)
 
     def _render_header(self, surface: pygame.Surface) -> None:
         """Render the game header (score and round info on menu bar)."""
